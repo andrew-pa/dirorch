@@ -1,0 +1,267 @@
+# Dirorch
+
+Dirorch is a directory-based workflow orchestrator.
+
+It executes workflow phases defined in YAML, where each entity is represented as a file in a phase/state directory and transitions are powered by shell hooks.
+
+## What It Does
+
+- Models workflow state directly on disk:
+  - one directory per phase
+  - one child directory per state
+  - one file per entity
+- Runs transitions until each phase reaches fixpoint (no more applicable moves)
+- Supports transition hooks, completion hooks, retries, jump phases, resume-from-state, and grouped concurrency
+
+## Requirements
+
+- Python `>=3.11`
+- `pyyaml>=6.0.2`
+
+## Installation
+
+With `uv`:
+
+```bash
+uv sync
+```
+
+Or with `pip`:
+
+```bash
+pip install -e .
+```
+
+## Quick Start
+
+1. Create a workflow file:
+
+```yaml
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+```
+
+2. Create initial entities:
+
+```bash
+mkdir -p ./work/tasks/new
+echo "task1" > ./work/tasks/new/01-task.txt
+echo "task2" > ./work/tasks/new/02-task.txt
+```
+
+3. Run Dirorch:
+
+```bash
+python main.py ./workflow.yaml --root ./work
+```
+
+After completion, entities will be moved into `./work/tasks/done`.
+
+## CLI Usage
+
+```text
+python main.py [-h] [--root ROOT] [--retries RETRIES]
+               [--state-file STATE_FILE]
+               [--log-level {DEBUG,INFO,WARNING,ERROR}]
+               workflow
+```
+
+Arguments:
+
+- `workflow`: path to workflow YAML file
+- `--root`: workflow state root directory (default: current directory)
+- `--retries`: override YAML retry count (`0` means one attempt total)
+- `--state-file`: runtime state filename under `--root` (default: `.dirorch_runtime.json`)
+- `--log-level`: `DEBUG|INFO|WARNING|ERROR` (default: `INFO`)
+
+## Workflow YAML Reference
+
+Top-level fields:
+
+- `phases` (required): mapping of phase name -> phase definition
+- `retries` (optional): non-negative integer, default `3`
+- `env` or `environment` (optional): map of string env vars passed to hooks
+
+Phase fields:
+
+- `states` (required): non-empty list of state names
+- `transitions` (optional): list of transition definitions
+- `completions` (optional): list of completion hook definitions
+  - `completion` is also accepted as alias
+
+Transition fields:
+
+- `from` (required): source state
+- `to` (required): destination state
+- `cmd` (optional): shell command to run before move
+- `jump` (optional): target phase name to run to fixpoint after successful transition
+
+Completion hook fields:
+
+- either a string command:
+  - `- "echo done"`
+- or object with `cmd`:
+  - `- cmd: "echo done"`
+
+Reserved state:
+
+- `_failed` is reserved and may not appear in `states`
+
+## Hook Environment
+
+Transition hooks receive:
+
+- `INPUT_ENTITY`: absolute path to the entity file currently being processed
+- `DIR_<PHASE>_<STATE>` for every declared phase/state directory
+
+Completion hooks receive:
+
+- `DIR_<PHASE>_<STATE>` for every declared phase/state directory
+
+All hooks also receive:
+
+- current process environment
+- values from YAML `env`/`environment`
+
+Env var naming for `DIR_<PHASE>_<STATE>`:
+
+- uppercased
+- non-alphanumeric characters replaced with `_`
+- example: phase `task-items`, state `in.progress` -> `DIR_TASK_ITEMS_IN_PROGRESS`
+
+## Directory Layout
+
+Given:
+
+- root: `./work`
+- phase: `tasks`
+- states: `new`, `in_progress`, `done`
+
+Dirorch uses:
+
+```text
+./work/
+  tasks/
+    new/
+    in_progress/
+    done/
+    _failed/
+```
+
+Files in state directories are workflow entities.
+
+## Execution Model
+
+1. Create missing phase/state directories (including `_failed`).
+2. Start from saved phase in runtime state file (or first phase if none).
+3. For current phase:
+   - apply transitions repeatedly until phase fixpoint
+   - then run completion hooks
+4. Move to next phase and repeat.
+5. After last phase, return to first phase.
+6. Exit successfully only when the first phase immediately reaches fixpoint with zero moves.
+
+Transition processing details:
+
+- Source entities are sorted alphabetically by filename.
+- If transition `cmd` succeeds (or no `cmd`), entity moves `from -> to`.
+- If `cmd` fails, it is retried `retries + 1` total attempts.
+- If still failing, entity moves to `_failed` and no jump occurs for that entity.
+- On successful transition with `jump`, target phase is run to fixpoint, then execution returns to the current phase.
+
+Concurrency rule:
+
+- Files named like `NN-name.ext` (numeric prefix + `-`) are grouped by `NN`.
+- Entities in the same group may run concurrently.
+- Other entities are processed sequentially.
+
+## Runtime State and Resume
+
+Dirorch stores runtime phase state in:
+
+- `${root}/${state-file}`
+- default: `.dirorch_runtime.json`
+
+Example:
+
+```json
+{
+  "current_phase": "tasks"
+}
+```
+
+On restart, Dirorch resumes from that phase.
+
+## Example Workflow (With Jump + Completion)
+
+```yaml
+retries: 2
+env:
+  PROJECT_ROOT: /workspace/project
+
+phases:
+  tasks:
+    states:
+      - new
+      - in_progress
+      - complete
+    transitions:
+      - from: new
+        to: in_progress
+        cmd: >
+          ./plan-task "$INPUT_ENTITY" "$DIR_SUBTASKS_NEW"
+        jump: subtasks
+      - from: in_progress
+        to: complete
+        cmd: >
+          ./complete-task "$INPUT_ENTITY"
+    completions:
+      - cmd: >
+          ./generate-task-summary "$DIR_TASKS_COMPLETE"
+
+  subtasks:
+    states:
+      - new
+      - complete
+    transitions:
+      - from: new
+        to: complete
+        cmd: >
+          ./exec-subtask "$INPUT_ENTITY"
+```
+
+## Logging
+
+Logging includes:
+
+- phase start/fixpoint events
+- hook failures/retries
+- entity moves
+- jump execution
+
+Use `--log-level DEBUG` for hook stdout/stderr on successful runs.
+
+## Running Tests
+
+```bash
+uv run --with pytest pytest -q
+```
+
+Or, if installed with dev extras:
+
+```bash
+pip install -e ".[dev]"
+pytest -q
+```
+
+## Troubleshooting
+
+- `Invalid YAML ...`: check quoting, indentation, and command string syntax.
+- `jump target ... is undefined`: `jump` must reference an existing phase name.
+- `transition source/destination ... is not a phase state`: verify `from`/`to` are declared in phase `states`.
+- Completion hook failure aborts the run: inspect logs and hook exit status.
+- Entities unexpectedly in `_failed`: transition hook exhausted retries and never succeeded.
