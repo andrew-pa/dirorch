@@ -26,7 +26,7 @@ def _run_workflow(workflow: Path, root: Path, retries: int | None = None, log_le
     asyncio.run(run(options))
 
 
-def test_load_workflow_parses_env_and_retries(tmp_path: Path) -> None:
+def test_load_workflow_parses_env_retries_and_init(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
         workflow,
@@ -34,6 +34,8 @@ def test_load_workflow_parses_env_and_retries(tmp_path: Path) -> None:
 retries: 5
 env:
   FOO: bar
+init:
+  cmd: "echo init"
 phases:
   tasks:
     states: [new, done]
@@ -49,6 +51,8 @@ phases:
     assert config.environment == {"FOO": "bar"}
     assert config.phase_order == ("tasks",)
     assert config.phases[0].states == ("new", "done")
+    assert config.init is not None
+    assert config.init.cmd == "echo init"
 
 
 @pytest.mark.parametrize(
@@ -77,6 +81,15 @@ phases:
         jump: nowhere
 """,
             "jump target 'nowhere'",
+        ),
+        (
+            """
+init: []
+phases:
+  p:
+    states: [new]
+""",
+            "'init' must be a string or a mapping with 'cmd'",
         ),
     ],
 )
@@ -116,6 +129,69 @@ phases:
 
     state = json.loads((tmp_path / ".dirorch_runtime.json").read_text(encoding="utf-8"))
     assert state["current_phase"] == "tasks"
+
+
+def test_init_hook_runs_once_before_any_phase(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+init: >
+  echo init >> {trace_file};
+  echo seeded > "$DIR_TASKS_NEW/from-init.txt"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "from-init.txt").exists()
+    trace_lines = trace_file.read_text(encoding="utf-8").splitlines()
+    assert trace_lines == ["init"]
+
+
+def test_init_hook_retries_then_succeeds(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    marker = tmp_path / "init.marker"
+    success_out = tmp_path / "init.success"
+    _write(
+        workflow,
+        f"""
+retries: 1
+init: >
+  if [ -f {marker} ]; then echo ok > {success_out}; else touch {marker}; exit 1; fi
+phases:
+  tasks:
+    states: [new]
+""",
+    )
+
+    _run_workflow(workflow, tmp_path)
+
+    assert success_out.exists()
+
+
+def test_init_hook_failure_aborts_run(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+retries: 0
+init: "exit 9"
+phases:
+  tasks:
+    states: [new]
+""",
+    )
+
+    with pytest.raises(WorkflowError, match="init hook failed after retries"):
+        _run_workflow(workflow, tmp_path)
 
 
 def test_transition_hook_gets_input_and_dir_env(tmp_path: Path) -> None:

@@ -85,6 +85,7 @@ Top-level fields:
 - `phases` (required): mapping of phase name -> phase definition
 - `retries` (optional): non-negative integer, default `3`
 - `env` or `environment` (optional): map of string env vars passed to hooks
+- `init` (optional): one-time startup hook before any phase runs
 
 Phase fields:
 
@@ -107,6 +108,13 @@ Completion hook fields:
 - or object with `cmd`:
   - `- cmd: "echo done"`
 
+Init hook fields:
+
+- either a string command:
+  - `init: "echo setup"`
+- or object with `cmd`:
+  - `init: { cmd: "echo setup" }`
+
 Reserved state:
 
 - `_failed` is reserved and may not appear in `states`
@@ -119,6 +127,10 @@ Transition hooks receive:
 - `DIR_<PHASE>_<STATE>` for every declared phase/state directory
 
 Completion hooks receive:
+
+- `DIR_<PHASE>_<STATE>` for every declared phase/state directory
+
+Init hook receives:
 
 - `DIR_<PHASE>_<STATE>` for every declared phase/state directory
 
@@ -157,13 +169,14 @@ Files in state directories are workflow entities.
 ## Execution Model
 
 1. Create missing phase/state directories (including `_failed`).
-2. Start from saved phase in runtime state file (or first phase if none).
-3. For current phase:
+2. Run `init` hook once (if configured).
+3. Start from saved phase in runtime state file (or first phase if none).
+4. For current phase:
    - apply transitions repeatedly until phase fixpoint
    - then run completion hooks
-4. Move to next phase and repeat.
-5. After last phase, return to first phase.
-6. Exit successfully only when the first phase immediately reaches fixpoint with zero moves.
+5. Move to next phase and repeat.
+6. After last phase, return to first phase.
+7. Exit successfully only when the first phase immediately reaches fixpoint with zero moves.
 
 Transition processing details:
 
@@ -172,6 +185,7 @@ Transition processing details:
 - If `cmd` fails, it is retried `retries + 1` total attempts.
 - If still failing, entity moves to `_failed` and no jump occurs for that entity.
 - On successful transition with `jump`, target phase is run to fixpoint, then execution returns to the current phase.
+- `init` and completion hooks use the same retry policy as transition hooks (`retries + 1` attempts total).
 
 Concurrency rule:
 
@@ -202,6 +216,9 @@ On restart, Dirorch resumes from that phase.
 retries: 2
 env:
   PROJECT_ROOT: /workspace/project
+init:
+  cmd: >
+    ./bootstrap-project "$DIR_TASKS_NEW" "$DIR_SUBTASKS_NEW"
 
 phases:
   tasks:
@@ -263,5 +280,6 @@ pytest -q
 - `Invalid YAML ...`: check quoting, indentation, and command string syntax.
 - `jump target ... is undefined`: `jump` must reference an existing phase name.
 - `transition source/destination ... is not a phase state`: verify `from`/`to` are declared in phase `states`.
+- `init hook failed after retries`: inspect startup command and any required files/directories.
 - Completion hook failure aborts the run: inspect logs and hook exit status.
 - Entities unexpectedly in `_failed`: transition hook exhausted retries and never succeeded.

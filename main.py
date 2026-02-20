@@ -47,6 +47,7 @@ class WorkflowConfig:
     phases: tuple[PhaseConfig, ...]
     environment: dict[str, str]
     retries: int
+    init: HookConfig | None
 
     @property
     def phase_order(self) -> tuple[str, ...]:
@@ -161,6 +162,7 @@ class DirectoryWorkflowEngine:
 
     async def run(self) -> None:
         self._ensure_layout()
+        await self._run_init()
         phase_order = self._config.phase_order
         first_phase = phase_order[0]
         current_phase = self._state.load_current_phase()
@@ -222,6 +224,16 @@ class DirectoryWorkflowEngine:
             success = await self._hook_runner.run(hook, {}, context)
             if not success:
                 raise WorkflowError(f"{context} failed after retries")
+
+    async def _run_init(self) -> None:
+        hook = self._config.init
+        if hook is None:
+            return
+        context = "init hook"
+        self._logger.info("Running %s", context)
+        success = await self._hook_runner.run(hook, {}, context)
+        if not success:
+            raise WorkflowError(f"{context} failed after retries")
 
     async def _apply_transition(
         self,
@@ -414,9 +426,10 @@ def load_workflow(path: Path) -> WorkflowConfig:
 
     environment = _load_environment(payload)
     retries = _load_retries(payload)
+    init = _parse_optional_hook(payload, "init")
     phases = _parse_phases(raw_phases)
     _validate_workflow(phases)
-    return WorkflowConfig(phases=phases, environment=environment, retries=retries)
+    return WorkflowConfig(phases=phases, environment=environment, retries=retries, init=init)
 
 
 def _load_environment(payload: dict[str, Any]) -> dict[str, str]:
@@ -440,6 +453,23 @@ def _load_retries(payload: dict[str, Any]) -> int:
     if not isinstance(retries, int) or retries < 0:
         raise WorkflowError("'retries' must be a non-negative integer")
     return retries
+
+
+def _parse_optional_hook(payload: dict[str, Any], field_name: str) -> HookConfig | None:
+    raw_hook = payload.get(field_name)
+    if raw_hook is None:
+        return None
+
+    if isinstance(raw_hook, str):
+        cmd = raw_hook
+    elif isinstance(raw_hook, dict):
+        cmd = raw_hook.get("cmd")
+    else:
+        raise WorkflowError(f"'{field_name}' must be a string or a mapping with 'cmd'")
+
+    if not isinstance(cmd, str) or not cmd.strip():
+        raise WorkflowError(f"'{field_name}' hook has invalid 'cmd'")
+    return HookConfig(cmd=cmd)
 
 
 def _parse_phases(raw_phases: dict[str, Any]) -> tuple[PhaseConfig, ...]:
