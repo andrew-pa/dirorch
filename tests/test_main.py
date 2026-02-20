@@ -15,7 +15,9 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _run_workflow(workflow: Path, root: Path, retries: int | None = None, log_level: str = "ERROR") -> None:
+def _run_workflow(
+    workflow: Path, root: Path, retries: int | None = None, log_level: str = "ERROR"
+) -> None:
     options = CliOptions(
         workflow=workflow,
         root=root,
@@ -381,7 +383,15 @@ phases:
     _write(new_dir / "cli.txt", "x")
 
     result = subprocess.run(
-        [sys.executable, "main.py", str(workflow), "--root", str(tmp_path), "--log-level", "ERROR"],
+        [
+            sys.executable,
+            "main.py",
+            str(workflow),
+            "--root",
+            str(tmp_path),
+            "--log-level",
+            "ERROR",
+        ],
         cwd=Path(__file__).resolve().parents[1],
         env={**os.environ},
         capture_output=True,
