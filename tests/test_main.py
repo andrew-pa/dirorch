@@ -40,6 +40,7 @@ init:
   cmd: "echo init"
 phases:
   tasks:
+    mode: entity
     states: [new, done]
     transitions:
       - from: new
@@ -53,6 +54,7 @@ phases:
     assert config.environment == {"FOO": "bar"}
     assert config.phase_order == ("tasks",)
     assert config.phases[0].states == ("new", "done")
+    assert config.phases[0].mode == "entity"
     assert config.init is not None
     assert config.init.cmd == "echo init"
 
@@ -92,6 +94,15 @@ phases:
     states: [new]
 """,
             "'init' must be a string or a mapping with 'cmd'",
+        ),
+        (
+            """
+phases:
+  p:
+    mode: per_entity
+    states: [new]
+""",
+            "invalid mode 'per_entity'",
         ),
     ],
 )
@@ -156,6 +167,109 @@ phases:
     assert (tmp_path / "tasks" / "done" / "from-init.txt").exists()
     trace_lines = trace_file.read_text(encoding="utf-8").splitlines()
     assert trace_lines == ["init"]
+
+
+def test_transition_mode_processes_transitions_in_batches(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, mid, done]
+    transitions:
+      - from: new
+        to: mid
+        cmd: >
+          echo "first-$(basename "$INPUT_ENTITY")" >> {trace_file}
+      - from: mid
+        to: done
+        cmd: >
+          echo "second-$(basename "$INPUT_ENTITY")" >> {trace_file}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+    _write(new_dir / "b.txt", "b")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert trace_file.read_text(encoding="utf-8").splitlines() == [
+        "first-a.txt",
+        "first-b.txt",
+        "second-a.txt",
+        "second-b.txt",
+    ]
+
+
+def test_entity_mode_processes_each_entity_until_rest(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    mode: entity
+    states: [new, mid, done]
+    transitions:
+      - from: new
+        to: mid
+        cmd: >
+          echo "first-$(basename "$INPUT_ENTITY")" >> {trace_file}
+      - from: mid
+        to: done
+        cmd: >
+          echo "second-$(basename "$INPUT_ENTITY")" >> {trace_file}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+    _write(new_dir / "b.txt", "b")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert trace_file.read_text(encoding="utf-8").splitlines() == [
+        "first-a.txt",
+        "second-a.txt",
+        "first-b.txt",
+        "second-b.txt",
+    ]
+
+
+def test_entity_mode_jump_runs_target_phase_to_fixpoint(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    mode: entity
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cp "$INPUT_ENTITY" "$DIR_SUBTASKS_NEW/sub-$(basename "$INPUT_ENTITY")"
+        jump: subtasks
+  subtasks:
+    states: [new, complete]
+    transitions:
+      - from: new
+        to: complete
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "a.txt").exists()
+    assert (tmp_path / "subtasks" / "complete" / "sub-a.txt").exists()
 
 
 def test_init_hook_retries_then_succeeds(tmp_path: Path) -> None:

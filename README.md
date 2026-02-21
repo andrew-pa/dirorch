@@ -102,6 +102,9 @@ Top-level fields:
 Phase fields:
 
 - `states` (required): non-empty list of state names
+- `mode` (optional): phase execution strategy
+  - `transitions` (default): process each transition rule across all applicable entities
+  - `entity`: process one entity through transitions until no transition applies, then next entity
 - `transitions` (optional): list of transition definitions
 - `completions` (optional): list of completion hook definitions
   - `completion` is also accepted as alias
@@ -198,6 +201,16 @@ Transition processing details:
 - If still failing, entity moves to `_failed` and no jump occurs for that entity.
 - On successful transition with `jump`, target phase is run to fixpoint, then execution returns to the current phase.
 - `init` and completion hooks use the same retry policy as transition hooks (`retries + 1` attempts total).
+
+Phase `mode` behavior:
+
+- `transitions` mode:
+  - Dirorch applies each transition rule to all matching entities, looping until fixpoint.
+  - Grouped concurrency (`NN-name.ext`) is enabled in this mode.
+- `entity` mode:
+  - Dirorch picks entities by filename, moves each entity through transitions until it comes to rest, then picks the next entity.
+  - Jumps still run immediately after a successful transition with `jump`.
+  - Processing is sequential per entity (no grouped concurrent transition execution).
 
 Concurrency rule:
 

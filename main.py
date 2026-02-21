@@ -15,6 +15,8 @@ import yaml
 
 FAILED_STATE = "_failed"
 GROUP_PATTERN = re.compile(r"^(\d+)-")
+PHASE_MODE_TRANSITIONS = "transitions"
+PHASE_MODE_ENTITY = "entity"
 
 
 class WorkflowError(RuntimeError):
@@ -40,6 +42,7 @@ class PhaseConfig:
     states: tuple[str, ...]
     transitions: tuple[TransitionConfig, ...]
     completions: tuple[HookConfig, ...]
+    mode: str = PHASE_MODE_TRANSITIONS
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,17 @@ class DirectoryWorkflowEngine:
     async def _run_phase(self, phase_name: str) -> int:
         phase = self._phases[phase_name]
         self._logger.info("Processing phase '%s'", phase_name)
+        if phase.mode == PHASE_MODE_ENTITY:
+            moved_total = await self._run_phase_entity_mode(phase)
+        else:
+            moved_total = await self._run_phase_transition_mode(phase)
+        await self._run_completions(phase)
+        self._logger.info(
+            "Phase '%s' reached fixpoint; transitions=%d", phase_name, moved_total
+        )
+        return moved_total
+
+    async def _run_phase_transition_mode(self, phase: PhaseConfig) -> int:
         moved_total = 0
         while True:
             moved_this_pass = 0
@@ -210,14 +224,21 @@ class DirectoryWorkflowEngine:
                 moved_this_pass += moved
                 moved_total += moved
                 for jump_name in jumps:
-                    await self._run_jump(jump_name, phase_name)
+                    await self._run_jump(jump_name, phase.name)
             if moved_this_pass == 0:
-                break
-        await self._run_completions(phase)
-        self._logger.info(
-            "Phase '%s' reached fixpoint; transitions=%d", phase_name, moved_total
-        )
-        return moved_total
+                return moved_total
+
+    async def _run_phase_entity_mode(self, phase: PhaseConfig) -> int:
+        moved_total = 0
+        while True:
+            moved_this_pass = 0
+            entities = self._list_phase_entities(phase)
+            for entity in entities:
+                moved = await self._flow_entity_to_rest(phase, entity)
+                moved_this_pass += moved
+                moved_total += moved
+            if moved_this_pass == 0:
+                return moved_total
 
     async def _run_jump(self, target_phase: str, source_phase: str) -> None:
         if target_phase == source_phase:
@@ -271,6 +292,33 @@ class DirectoryWorkflowEngine:
                     if result.jump is not None:
                         jumps.append(result.jump)
         return moved, jumps
+
+    async def _flow_entity_to_rest(self, phase: PhaseConfig, entity: Path) -> int:
+        if not entity.exists():
+            return 0
+
+        moved = 0
+        current = entity
+        while True:
+            state_name = current.parent.name
+            applied = False
+            for transition in phase.transitions:
+                if transition.source != state_name:
+                    continue
+                result = await self._process_entity(phase, transition, current)
+                if not result.moved:
+                    return moved
+                moved += 1
+                current = (
+                    self._phase_state_dirs[(phase.name, transition.destination)]
+                    / current.name
+                )
+                if result.jump is not None:
+                    await self._run_jump(result.jump, phase.name)
+                applied = True
+                break
+            if not applied:
+                return moved
 
     async def _process_group(
         self,
@@ -350,6 +398,13 @@ class DirectoryWorkflowEngine:
     def _list_entities(self, source_dir: Path) -> list[Path]:
         entities = [path for path in source_dir.iterdir() if path.is_file()]
         return sorted(entities, key=lambda path: path.name)
+
+    def _list_phase_entities(self, phase: PhaseConfig) -> list[Path]:
+        entities: list[Path] = []
+        for state in phase.states:
+            source_dir = self._phase_state_dirs[(phase.name, state)]
+            entities.extend(self._list_entities(source_dir))
+        return sorted(entities, key=lambda path: (path.name, str(path.parent)))
 
     def _group_entities(self, entities: list[Path]) -> list[Group]:
         groups: list[Group] = []
@@ -509,12 +564,14 @@ def _parse_phases(raw_phases: dict[str, Any]) -> tuple[PhaseConfig, ...]:
         states = _parse_states(phase_name, raw_phase)
         transitions = _parse_transitions(phase_name, raw_phase)
         completions = _parse_completions(phase_name, raw_phase)
+        mode = _parse_phase_mode(phase_name, raw_phase)
         phases.append(
             PhaseConfig(
                 name=phase_name,
                 states=states,
                 transitions=transitions,
                 completions=completions,
+                mode=mode,
             )
         )
     return tuple(phases)
@@ -606,6 +663,20 @@ def _parse_completions(
             )
         completions.append(HookConfig(cmd=cmd))
     return tuple(completions)
+
+
+def _parse_phase_mode(phase_name: str, raw_phase: dict[str, Any]) -> str:
+    raw_mode = raw_phase.get("mode", PHASE_MODE_TRANSITIONS)
+    if not isinstance(raw_mode, str):
+        raise WorkflowError(f"Phase '{phase_name}' field 'mode' must be a string")
+
+    mode = raw_mode.strip().lower()
+    if mode not in {PHASE_MODE_TRANSITIONS, PHASE_MODE_ENTITY}:
+        raise WorkflowError(
+            f"Phase '{phase_name}' has invalid mode '{raw_mode}'. "
+            f"Supported modes: '{PHASE_MODE_TRANSITIONS}', '{PHASE_MODE_ENTITY}'"
+        )
+    return mode
 
 
 def _validate_workflow(phases: tuple[PhaseConfig, ...]) -> None:
