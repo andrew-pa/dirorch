@@ -26,6 +26,12 @@ With `uv`:
 uv sync
 ```
 
+Install as a global tool (exposes `dirorch` command):
+
+```bash
+uv tool install .
+```
+
 Or with `pip`:
 
 ```bash
@@ -56,6 +62,12 @@ echo "task2" > ./work/tasks/new/02-task.txt
 3. Run Dirorch:
 
 ```bash
+dirorch ./workflow.yaml --root ./work
+```
+
+Alternative (without installing a tool):
+
+```bash
 python main.py ./workflow.yaml --root ./work
 ```
 
@@ -64,10 +76,10 @@ After completion, entities will be moved into `./work/tasks/done`.
 ## CLI Usage
 
 ```text
-python main.py [-h] [--root ROOT] [--retries RETRIES]
-               [--state-file STATE_FILE]
-               [--log-level {DEBUG,INFO,WARNING,ERROR}]
-               workflow
+dirorch [-h] [--root ROOT] [--retries RETRIES]
+        [--state-file STATE_FILE]
+        [--log-level {DEBUG,INFO,WARNING,ERROR}]
+        workflow
 ```
 
 Arguments:
