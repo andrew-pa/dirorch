@@ -128,17 +128,9 @@ class HookRunner:
                 hook.cmd,
                 cwd=str(self._root),
                 env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
             )
-            stdout_bytes, stderr_bytes = await process.communicate()
-            stdout = stdout_bytes.decode(errors="replace").strip()
-            stderr = stderr_bytes.decode(errors="replace").strip()
+            await process.wait()
             if process.returncode == 0:
-                if stdout:
-                    self._logger.debug("%s stdout:\n%s", context, stdout)
-                if stderr:
-                    self._logger.debug("%s stderr:\n%s", context, stderr)
                 return True
             self._logger.warning(
                 "%s failed (attempt %d/%d, exit=%s)",
@@ -147,10 +139,6 @@ class HookRunner:
                 attempts,
                 process.returncode,
             )
-            if stdout:
-                self._logger.warning("%s stdout:\n%s", context, stdout)
-            if stderr:
-                self._logger.warning("%s stderr:\n%s", context, stderr)
         return False
 
 

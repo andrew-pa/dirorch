@@ -284,8 +284,7 @@ Logging includes:
 - hook failures/retries
 - entity moves
 - jump execution
-
-Use `--log-level DEBUG` for hook stdout/stderr on successful runs.
+- hook command stdout/stderr streamed directly to the terminal
 
 ## Running Tests
 
