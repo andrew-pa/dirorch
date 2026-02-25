@@ -18,6 +18,17 @@ A workflow definition should also have an optional section for environment varia
 We model the workflow's overall state on disk using one directory per phase, with child directories per state, and each entity as a file.
 When first starting, the necessary directories are created if they do not exist. The system then beings or resumes processing at the currently running phase.
 
+The codebase is split by responsibility:
+
+- `dirorch/config_loader.py` parses and validates workflow YAML.
+- `dirorch/entities.py` encapsulates directory layout and file moves.
+- `dirorch/hooks.py` executes retryable shell hooks.
+- `dirorch/workflow.py` contains orchestration and phase execution policy.
+- `dirorch/state.py` manages persisted runtime phase state.
+- `dirorch/env.py` builds the hook environment surface.
+
+This separation keeps policy and effects distinct, and makes orchestration logic testable independent of YAML parsing or filesystem details.
+
 Transition hooks are shell commands executed with the environment variable `INPUT_ENTITY` set to the path of the entity in the source state, and environment variables `DIR_<PHASE>_<STATE>` defined for each phase state respectively pointing to their directories.
 When the transition hook completes successfully the entity file is moved to the destination state directory. 
 If it is not successful, it is retried N times then if it still fails the task is moved to a special failure state (`_failed`) and no jump is taken.

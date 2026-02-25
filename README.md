@@ -4,6 +4,21 @@ Dirorch is a directory-based workflow orchestrator.
 
 It executes workflow phases defined in YAML, where each entity is represented as a file in a phase/state directory and transitions are powered by shell hooks.
 
+## Code Architecture
+
+The implementation is organized into focused modules under `dirorch/`:
+
+- `config_loader.py`: YAML parsing and validation
+- `workflow.py`: phase processing and orchestration loop
+- `entities.py`: filesystem-backed entity/state operations
+- `hooks.py`: hook execution + retries
+- `state.py`: runtime phase persistence
+- `env.py`: hook environment composition
+- `app.py`: top-level dependency wiring (`run`)
+- `cli.py`: argument parsing and logging setup
+
+`main.py` is intentionally thin and exists as a compatibility entrypoint for imports and CLI execution.
+
 ## What It Does
 
 - Models workflow state directly on disk:
