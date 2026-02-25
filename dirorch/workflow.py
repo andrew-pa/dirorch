@@ -89,7 +89,9 @@ class PhaseProcessor:
         phase: PhaseConfig,
         transition: TransitionConfig,
     ) -> tuple[int, list[str]]:
-        entities = self._entities.list_transition_entities(phase.name, transition.source)
+        entities = self._entities.list_transition_entities(
+            phase.name, transition.source
+        )
         if not entities:
             return 0, []
 
@@ -146,7 +148,10 @@ class PhaseProcessor:
                 return moved
 
             moved += 1
-            current = self._entities.dir_for(phase.name, transition.destination) / current.name
+            current = (
+                self._entities.dir_for(phase.name, transition.destination)
+                / current.name
+            )
             if result.jump is not None:
                 await self._jump_handler(result.jump, phase.name)
 
@@ -168,10 +173,14 @@ class PhaseProcessor:
         if transition.cmd is None:
             success = True
         else:
-            success = await self._hook_runner.run(HookConfig(transition.cmd), extra_env, context)
+            success = await self._hook_runner.run(
+                HookConfig(transition.cmd), extra_env, context
+            )
 
         if success:
-            await self._entities.move_to_state(phase.name, transition.destination, entity)
+            await self._entities.move_to_state(
+                phase.name, transition.destination, entity
+            )
             self._logger.info(
                 "Moved entity '%s' to %s/%s",
                 entity.name,

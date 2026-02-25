@@ -25,12 +25,16 @@ class EntityStore:
     def dir_for(self, phase_name: str, state_name: str) -> Path:
         return self._phase_state_dirs[(phase_name, state_name)]
 
-    async def move_to_state(self, phase_name: str, state_name: str, entity: Path) -> None:
+    async def move_to_state(
+        self, phase_name: str, state_name: str, entity: Path
+    ) -> None:
         destination = self.dir_for(phase_name, state_name) / entity.name
         destination.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(shutil.move, str(entity), str(destination))
 
-    def list_transition_entities(self, phase_name: str, source_state: str) -> list[Path]:
+    def list_transition_entities(
+        self, phase_name: str, source_state: str
+    ) -> list[Path]:
         source_dir = self.dir_for(phase_name, source_state)
         return self._list_entities(source_dir)
 
