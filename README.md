@@ -80,6 +80,17 @@ echo "task2" > ./work/tasks/new/02-task.txt
 dirorch ./workflow.yaml --root ./work
 ```
 
+Or run by workflow name from global config:
+
+```bash
+dirorch my-workflow --root ./work
+```
+
+Named workflows resolve in:
+
+- `$XDG_CONFIG_DIR/dirorch/workflows/<name>.yml` when `XDG_CONFIG_DIR` is set
+- `~/.config/dirorch/workflows/<name>.yml` otherwise
+
 Alternative (without installing a tool):
 
 ```bash
@@ -99,7 +110,9 @@ dirorch [-h] [--root ROOT] [--retries RETRIES]
 
 Arguments:
 
-- `workflow`: path to workflow YAML file
+- `workflow`: either a path to a workflow YAML file, or a name that resolves to `<config>/dirorch/workflows/<name>.yml`
+  - `<config>` is `$XDG_CONFIG_DIR` when set
+  - fallback `<config>` is `~/.config`
 - `--root`: workflow state root directory (default: current directory)
 - `--retries`: override YAML retry count (`0` means one attempt total)
 - `--state-file`: runtime state filename under `--root` (default: `.dirorch_runtime.json`)

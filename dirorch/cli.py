@@ -11,7 +11,11 @@ def parse_args() -> CliOptions:
     parser = argparse.ArgumentParser(
         description="Run directory-based workflow orchestration"
     )
-    parser.add_argument("workflow", type=Path, help="Path to workflow YAML file")
+    parser.add_argument(
+        "workflow",
+        type=Path,
+        help="Workflow path, or name resolved from $XDG_CONFIG_DIR/dirorch/workflows/<name>.yml (fallback: ~/.config/dirorch/workflows/<name>.yml)",
+    )
     parser.add_argument(
         "--root",
         type=Path,

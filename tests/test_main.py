@@ -515,3 +515,75 @@ phases:
 
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "tasks" / "done" / "cli.txt").exists()
+
+
+def test_run_supports_named_global_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    workflow_dir = home / ".config" / "dirorch" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    _write(
+        workflow_dir / "global.yml",
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+    root = tmp_path / "root"
+    new_dir = root / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "named.txt", "x")
+    monkeypatch.setenv("HOME", str(home))
+
+    options = CliOptions(
+        workflow=Path("global"),
+        root=root,
+        retries_override=None,
+        state_file=".dirorch_runtime.json",
+        log_level="ERROR",
+    )
+
+    asyncio.run(run(options))
+
+    assert (root / "tasks" / "done" / "named.txt").exists()
+
+
+def test_run_named_global_workflow_prefers_xdg_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    xdg = tmp_path / "xdg"
+    xdg_workflow_dir = xdg / "dirorch" / "workflows"
+    xdg_workflow_dir.mkdir(parents=True)
+    _write(
+        xdg_workflow_dir / "global.yml",
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+    root = tmp_path / "root-xdg"
+    new_dir = root / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "named.txt", "x")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_DIR", str(xdg))
+
+    options = CliOptions(
+        workflow=Path("global"),
+        root=root,
+        retries_override=None,
+        state_file=".dirorch_runtime.json",
+        log_level="ERROR",
+    )
+
+    asyncio.run(run(options))
+
+    assert (root / "tasks" / "done" / "named.txt").exists()
