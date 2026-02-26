@@ -167,6 +167,82 @@ phases:
     assert state["current_phase"] == "tasks"
 
 
+def test_workflow_env_templates_can_reference_dir_variables(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "observed.txt"
+    _write(
+        workflow,
+        f"""
+env:
+  TARGET_PATH: "{{{{ DIR_TASKS_DONE }}}}/target.txt"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          printf '%s' "$TARGET_PATH" > "{observed}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "x.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert observed.read_text(encoding="utf-8") == str(
+        (tmp_path / "tasks" / "done" / "target.txt").resolve()
+    )
+
+
+def test_workflow_env_templates_can_include_files(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "observed.txt"
+    payload = tmp_path / "payload.txt"
+    _write(payload, "file-payload\n")
+    _write(
+        workflow,
+        f"""
+env:
+  PAYLOAD_PATH: "{payload}"
+  PAYLOAD: "{{{{ include_file(PAYLOAD_PATH).strip() }}}}"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          printf '%s' "$PAYLOAD" > "{observed}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "x.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert observed.read_text(encoding="utf-8") == "file-payload"
+
+
+def test_workflow_env_templates_cannot_reference_input_entity(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+env:
+  BAD: "{{ INPUT_ENTITY }}"
+phases:
+  tasks:
+    states: [new]
+""",
+    )
+
+    with pytest.raises(WorkflowError, match="INPUT_ENTITY"):
+        _run_workflow(workflow, tmp_path)
+
+
 def test_init_hook_runs_once_before_any_phase(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     trace_file = tmp_path / "trace.log"

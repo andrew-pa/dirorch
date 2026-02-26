@@ -124,7 +124,7 @@ Top-level fields:
 
 - `phases` (required): mapping of phase name -> phase definition
 - `retries` (optional): non-negative integer, default `3`
-- `env` or `environment` (optional): map of string env vars passed to hooks
+- `env` or `environment` (optional): map of string env vars passed to hooks; values are Jinja2 templates rendered at startup
 - `init` (optional): one-time startup hook before any phase runs
 
 Phase fields:
@@ -187,6 +187,13 @@ All hooks also receive:
 
 - current process environment
 - values from YAML `env`/`environment`
+
+Workflow `env` template context includes:
+
+- other already-resolved workflow env vars
+- generated `DIR_<PHASE>_<STATE>` variables
+
+Workflow `env` templates do not include `INPUT_ENTITY`.
 
 ## Stdin Templates
 

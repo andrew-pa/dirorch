@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import HookConfig
-from .template_engine import StdinTemplateError, StdinTemplateRenderer
+from .template_engine import TemplateRenderError, TemplateRenderer
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class HookRunner:
         self._template_env = config.template_env
         self._retries = config.retries
         self._logger = config.logger
-        self._stdin_renderer = StdinTemplateRenderer(self._root)
+        self._stdin_renderer = TemplateRenderer(self._root)
 
     async def run(
         self, hook: HookConfig, extra_env: dict[str, str], context: str
@@ -38,7 +38,7 @@ class HookRunner:
         for attempt in range(1, attempts + 1):
             try:
                 stdin_payload = self._render_stdin(hook, template_env)
-            except StdinTemplateError as exc:
+            except TemplateRenderError as exc:
                 self._logger.warning(
                     "%s failed (attempt %d/%d): stdin template error: %s",
                     context,

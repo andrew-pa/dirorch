@@ -6,7 +6,7 @@ from pathlib import Path
 from .cli import configure_logging
 from .config_loader import load_workflow
 from .entities import EntityStore
-from .env import build_defined_hook_env, build_hook_env
+from .env import build_defined_hook_env, build_hook_env_from_defined
 from .hooks import HookRunner, HookRunnerConfig
 from .models import CliOptions
 from .state import RuntimeStateStore
@@ -41,7 +41,7 @@ async def run(options: CliOptions) -> None:
         else config.retries
     )
     template_env = build_defined_hook_env(config, options.root)
-    base_env = build_hook_env(config, options.root)
+    base_env = build_hook_env_from_defined(template_env)
 
     state = RuntimeStateStore(options.root, options.state_file)
     hook_runner = HookRunner(
