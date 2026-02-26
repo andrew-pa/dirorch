@@ -79,7 +79,7 @@ class PhaseProcessor:
             success = True
         else:
             success = await self._hook_runner.run(
-                HookConfig(transition.cmd), extra_env, context
+                HookConfig(cmd=transition.cmd, stdin=transition.stdin), extra_env, context
             )
 
         if success:

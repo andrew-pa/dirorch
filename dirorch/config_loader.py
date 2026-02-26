@@ -70,16 +70,12 @@ def _parse_optional_hook(payload: dict[str, Any], field_name: str) -> HookConfig
     if raw_hook is None:
         return None
 
-    if isinstance(raw_hook, str):
-        cmd = raw_hook
-    elif isinstance(raw_hook, dict):
-        cmd = raw_hook.get("cmd")
-    else:
+    try:
+        return _parse_hook(raw_hook)
+    except ValueError:
         raise WorkflowError(f"'{field_name}' must be a string or a mapping with 'cmd'")
-
-    if not isinstance(cmd, str) or not cmd.strip():
-        raise WorkflowError(f"'{field_name}' hook has invalid 'cmd'")
-    return HookConfig(cmd=cmd)
+    except WorkflowError as exc:
+        raise WorkflowError(f"'{field_name}' hook {exc}") from exc
 
 
 def _parse_phases(raw_phases: dict[str, Any]) -> tuple[PhaseConfig, ...]:
@@ -148,6 +144,7 @@ def _parse_transitions(
         source = item.get("from")
         destination = item.get("to")
         cmd = item.get("cmd")
+        stdin = item.get("stdin")
         jump = item.get("jump")
 
         if not isinstance(source, str) or not source:
@@ -162,13 +159,27 @@ def _parse_transitions(
             raise WorkflowError(
                 f"Phase '{phase_name}' transition '{source}->{destination}' has invalid 'cmd'"
             )
+        if stdin is not None and not isinstance(stdin, str):
+            raise WorkflowError(
+                f"Phase '{phase_name}' transition '{source}->{destination}' has invalid 'stdin'"
+            )
+        if cmd is None and stdin is not None:
+            raise WorkflowError(
+                f"Phase '{phase_name}' transition '{source}->{destination}' requires 'cmd' when 'stdin' is set"
+            )
         if jump is not None and (not isinstance(jump, str) or not jump):
             raise WorkflowError(
                 f"Phase '{phase_name}' transition '{source}->{destination}' has invalid 'jump'"
             )
 
         transitions.append(
-            TransitionConfig(source=source, destination=destination, cmd=cmd, jump=jump)
+            TransitionConfig(
+                source=source,
+                destination=destination,
+                cmd=cmd,
+                stdin=stdin,
+                jump=jump,
+            )
         )
     return tuple(transitions)
 
@@ -185,20 +196,17 @@ def _parse_completions(
 
     completions: list[HookConfig] = []
     for item in raw_completions:
-        if isinstance(item, str):
-            cmd = item
-        elif isinstance(item, dict):
-            cmd = item.get("cmd")
-        else:
+        try:
+            hook = _parse_hook(item)
+        except ValueError:
             raise WorkflowError(
                 f"Phase '{phase_name}' completion entries must be strings or mappings"
             )
-
-        if not isinstance(cmd, str) or not cmd.strip():
+        except WorkflowError as exc:
             raise WorkflowError(
-                f"Phase '{phase_name}' completion hook has invalid 'cmd'"
-            )
-        completions.append(HookConfig(cmd=cmd))
+                f"Phase '{phase_name}' completion hook {exc}"
+            ) from exc
+        completions.append(hook)
     return tuple(completions)
 
 
@@ -233,3 +241,20 @@ def _validate_workflow(phases: tuple[PhaseConfig, ...]) -> None:
                 raise WorkflowError(
                     f"Phase '{phase.name}' transition jump target '{transition.jump}' is undefined"
                 )
+
+
+def _parse_hook(raw_hook: Any) -> HookConfig:
+    if isinstance(raw_hook, str):
+        cmd = raw_hook
+        stdin = None
+    elif isinstance(raw_hook, dict):
+        cmd = raw_hook.get("cmd")
+        stdin = raw_hook.get("stdin")
+    else:
+        raise ValueError("hook must be string or mapping")
+
+    if not isinstance(cmd, str) or not cmd.strip():
+        raise WorkflowError("has invalid 'cmd'")
+    if stdin is not None and not isinstance(stdin, str):
+        raise WorkflowError("has invalid 'stdin'")
+    return HookConfig(cmd=cmd, stdin=stdin)

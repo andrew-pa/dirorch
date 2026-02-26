@@ -104,6 +104,29 @@ phases:
 """,
             "invalid mode 'per_entity'",
         ),
+        (
+            """
+init:
+  cmd: "cat"
+  stdin: 1
+phases:
+  p:
+    states: [new]
+""",
+            "hook has invalid 'stdin'",
+        ),
+        (
+            """
+phases:
+  p:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        stdin: "x"
+""",
+            "requires 'cmd' when 'stdin' is set",
+        ),
     ],
 )
 def test_load_workflow_rejects_invalid_definitions(
@@ -339,6 +362,77 @@ phases:
     assert Path(done_dir) == (tmp_path / "tasks" / "done").resolve()
 
 
+def test_transition_hook_stdin_template_renders_vars_and_file(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    include_path = tmp_path / "payload.txt"
+    observed = tmp_path / "rendered.txt"
+    _write(include_path, "from-file\n")
+    _write(
+        workflow,
+        f"""
+env:
+  GREETING: hello
+  FILE_TO_INCLUDE: "{include_path}"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cat > "{observed}"
+        stdin: |
+          greeting={{{{ GREETING }}}}
+          input={{{{ INPUT_ENTITY }}}}
+          payload={{{{ include_file(FILE_TO_INCLUDE).strip() }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "x.txt"
+    _write(entity, "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    rendered = observed.read_text(encoding="utf-8").splitlines()
+    assert rendered[0] == "greeting=hello"
+    assert rendered[1] == f"input={entity.resolve()}"
+    assert rendered[2] == "payload=from-file"
+
+
+def test_stdin_template_cannot_access_external_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "rendered.txt"
+    monkeypatch.setenv("EXTERNAL_ONLY", "secret")
+    _write(
+        workflow,
+        f"""
+retries: 0
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cat > "{observed}"
+        stdin: |
+          {{{{ EXTERNAL_ONLY }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "x.txt"
+    _write(entity, "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / FAILED_STATE / "x.txt").exists()
+    assert not observed.exists()
+
+
 def test_failure_retries_then_moves_to_failed(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
@@ -389,6 +483,36 @@ phases:
     _run_workflow(workflow, tmp_path)
 
     assert completion_out.exists()
+
+
+def test_completion_hook_supports_templated_stdin(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    completion_out = tmp_path / "completion.txt"
+    _write(
+        workflow,
+        f"""
+env:
+  MESSAGE: hello-completion
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+    completions:
+      - cmd: >
+          cat > "{completion_out}"
+        stdin: |
+          {{{{ MESSAGE }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "t.txt", "task")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert completion_out.read_text(encoding="utf-8").strip() == "hello-completion"
 
 
 def test_jump_runs_target_phase_to_fixpoint(tmp_path: Path) -> None:

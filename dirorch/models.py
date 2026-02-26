@@ -9,6 +9,7 @@ from .constants import PHASE_MODE_TRANSITIONS
 @dataclass(frozen=True)
 class HookConfig:
     cmd: str
+    stdin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class TransitionConfig:
     source: str
     destination: str
     cmd: str | None = None
+    stdin: str | None = None
     jump: str | None = None
 
 

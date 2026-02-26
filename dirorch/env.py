@@ -11,7 +11,14 @@ def build_hook_env(config: WorkflowConfig, root: Path) -> dict[str, str]:
     """Build process + workflow environment visible to all hooks."""
 
     env = dict(os.environ)
-    env.update(config.environment)
+    env.update(build_defined_hook_env(config, root))
+    return env
+
+
+def build_defined_hook_env(config: WorkflowConfig, root: Path) -> dict[str, str]:
+    """Build only Dirorch-defined hook environment variables."""
+
+    env = dict(config.environment)
     for phase in config.phases:
         for state in phase.states:
             key = f"DIR_{_sanitize_token(phase.name)}_{_sanitize_token(state)}"

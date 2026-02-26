@@ -142,6 +142,7 @@ Transition fields:
 - `from` (required): source state
 - `to` (required): destination state
 - `cmd` (optional): shell command to run before move
+- `stdin` (optional): text rendered and piped to the hook process stdin (requires `cmd`)
 - `jump` (optional): target phase name to run to fixpoint after successful transition
 
 Completion hook fields:
@@ -150,6 +151,9 @@ Completion hook fields:
   - `- "echo done"`
 - or object with `cmd`:
   - `- cmd: "echo done"`
+  - optional `stdin`:
+    - `- cmd: "cat > out.txt"`
+    - `  stdin: "hello {{ MY_VAR }}"`
 
 Init hook fields:
 
@@ -157,6 +161,8 @@ Init hook fields:
   - `init: "echo setup"`
 - or object with `cmd`:
   - `init: { cmd: "echo setup" }`
+  - optional `stdin`:
+    - `init: { cmd: "cat > setup.txt", stdin: "seed={{ APP_SEED }}" }`
 
 Reserved state:
 
@@ -181,6 +187,24 @@ All hooks also receive:
 
 - current process environment
 - values from YAML `env`/`environment`
+
+## Stdin Templates
+
+If a hook defines `stdin`, Dirorch renders it with Jinja2 before piping it into the command.
+
+Template context includes only Dirorch-defined variables:
+
+- YAML `env`/`environment` values
+- generated `DIR_<PHASE>_<STATE>` variables
+- hook runtime variables like `INPUT_ENTITY` (for transition hooks)
+
+External inherited process variables are not available in templates.
+
+Template helpers:
+
+- `read_file(path)` (alias: `include_file(path)`): reads UTF-8 file content and inserts it into the rendered stdin text.
+  - relative paths resolve from `--root`
+  - you can pass path variables, e.g. `{{ read_file(FILE_TO_INCLUDE) }}`
 
 Env var naming for `DIR_<PHASE>_<STATE>`:
 
