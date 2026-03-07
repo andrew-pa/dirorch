@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .constants import FAILED_STATE, PHASE_MODE_ENTITY, PHASE_MODE_TRANSITIONS
@@ -18,9 +18,18 @@ from .models import (
     TransitionResult,
     WorkflowConfig,
 )
-from .state import RuntimeStateStore
+from .state import (
+    STATE_SCHEMA_VERSION,
+    EntityCursor,
+    JumpFrame,
+    RuntimeSnapshot,
+    RuntimeStateStore,
+)
 
 JumpHandler = Callable[[str, str], Awaitable[None]]
+EntityCursorLoader = Callable[[str], str | None]
+EntityCursorSaver = Callable[[str, str], None]
+EntityCursorClearer = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,9 @@ class PhaseProcessorDeps:
     entities: EntityStore
     logger: logging.Logger
     jump_handler: JumpHandler
+    load_entity_cursor: EntityCursorLoader
+    save_entity_cursor: EntityCursorSaver
+    clear_entity_cursor: EntityCursorClearer
 
 
 class PhaseProcessor:
@@ -39,6 +51,9 @@ class PhaseProcessor:
         self._entities = deps.entities
         self._logger = deps.logger
         self._jump_handler = deps.jump_handler
+        self._load_entity_cursor = deps.load_entity_cursor
+        self._save_entity_cursor = deps.save_entity_cursor
+        self._clear_entity_cursor = deps.clear_entity_cursor
         self.config = config
 
     async def _run(self) -> int:
@@ -103,9 +118,9 @@ class PhaseProcessor:
         )
         return TransitionResult(moved=False, jump=None)
 
+
 class AllAtOncePhaseProcessor(PhaseProcessor):
     """Processes entities together in groups, applying each transition to all applicable entities before moving on to the next transition."""
-    pass
 
     async def _run(self) -> int:
         moved_total = 0
@@ -165,24 +180,49 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
             for entity in group.entities
         ]
 
+
 class OneAtATimePhaseProcessor(PhaseProcessor):
     """Processes entities singularly, applying all possible transitions to a single entity before moving to the next one."""
-    pass
 
     async def _run(self) -> int:
         moved_total = 0
         while True:
             moved_this_pass = 0
-            for entity in self._entities.list_phase_entities(self.config):
+            for entity in self._entities_for_pass():
                 moved = await self._flow_entity_to_rest(entity)
                 moved_this_pass += moved
                 moved_total += moved
             if moved_this_pass == 0:
                 return moved_total
 
+    def _entities_for_pass(self) -> list[Path]:
+        entities = self._entities.list_phase_entities(self.config)
+        cursor_name = self._load_entity_cursor(self.config.name)
+        if cursor_name is None:
+            return entities
+
+        for entity in entities:
+            if entity.name == cursor_name:
+                self._logger.info(
+                    "Resuming entity cursor '%s' in phase '%s'",
+                    cursor_name,
+                    self.config.name,
+                )
+                return [entity] + [candidate for candidate in entities if candidate != entity]
+
+        self._logger.warning(
+            "State cursor for phase '%s' entity '%s' is stale; clearing and continuing",
+            self.config.name,
+            cursor_name,
+        )
+        self._clear_entity_cursor()
+        return entities
+
     async def _flow_entity_to_rest(self, entity: Path) -> int:
         if not entity.exists():
             return 0
+
+        self._save_entity_cursor(self.config.name, entity.name)
 
         moved = 0
         current = entity
@@ -190,10 +230,12 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
             state_name = current.parent.name
             transition = _find_transition_from_state(self.config, state_name)
             if transition is None:
+                self._clear_entity_cursor()
                 return moved
 
             result = await self._process_entity(transition, current)
             if not result.moved:
+                self._clear_entity_cursor()
                 return moved
 
             moved += 1
@@ -204,10 +246,12 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
             if result.jump is not None:
                 await self._jump_handler(result.jump, self.config.name)
 
+
 PHASE_PROCESSOR_FOR_MODE = {
     PHASE_MODE_TRANSITIONS: AllAtOncePhaseProcessor,
-    PHASE_MODE_ENTITY: OneAtATimePhaseProcessor
+    PHASE_MODE_ENTITY: OneAtATimePhaseProcessor,
 }
+
 
 class WorkflowEngine:
     """Coordinates full workflow scheduling across phases and jumps."""
@@ -230,11 +274,15 @@ class WorkflowEngine:
         self._hook_runner = deps.hook_runner
         self._logger = deps.logger
         self._phases = {phase.name: phase for phase in config.phases}
+        self._snapshot: RuntimeSnapshot | None = None
         self._phase_processor_deps = PhaseProcessorDeps(
             hook_runner=deps.hook_runner,
             entities=deps.entities,
             logger=deps.logger,
             jump_handler=self._run_jump,
+            load_entity_cursor=self._load_entity_cursor,
+            save_entity_cursor=self._save_entity_cursor,
+            clear_entity_cursor=self._clear_entity_cursor,
         )
 
     def _processor_for_phase(self, phase: PhaseConfig) -> PhaseProcessor:
@@ -246,32 +294,28 @@ class WorkflowEngine:
 
         phase_order = self._config.phase_order
         first_phase = phase_order[0]
-        current_phase = self._state.load_current_phase()
-
-        if current_phase is None:
-            current_index = 0
-            self._state.save_current_phase(phase_order[current_index])
-        else:
-            if current_phase not in self._phases:
-                raise WorkflowError(
-                    f"State file references unknown phase '{current_phase}'. "
-                    f"Known phases: {', '.join(phase_order)}"
-                )
-            current_index = phase_order.index(current_phase)
+        self._snapshot = self._load_or_init_snapshot(phase_order)
 
         wrapped_to_first = False
         while True:
-            phase_name = phase_order[current_index]
-            self._state.save_current_phase(phase_name)
+            phase_name = self._snapshot.current_phase
             processor = self._processor_for_phase(self._phases[phase_name])
             moved = await processor.run_phase()
+
+            if self._unwind_jump_if_target_phase(phase_name):
+                continue
+
             if wrapped_to_first and phase_name == first_phase and moved == 0:
                 self._logger.info(
                     "Reached stable fixpoint at first phase '%s'; exiting", first_phase
                 )
                 return
-            current_index = (current_index + 1) % len(phase_order)
-            if current_index == 0:
+
+            current_index = phase_order.index(phase_name)
+            next_phase = phase_order[(current_index + 1) % len(phase_order)]
+            self._set_current_phase(next_phase)
+            self._clear_entity_cursor()
+            if next_phase == first_phase:
                 wrapped_to_first = True
 
     async def _run_jump(self, target_phase: str, source_phase: str) -> None:
@@ -279,13 +323,31 @@ class WorkflowEngine:
             self._logger.warning("Ignoring self-jump from phase '%s'", source_phase)
             return
 
+        source_entity_name = self._load_entity_cursor(source_phase)
+        frame = JumpFrame(
+            source_phase=source_phase,
+            target_phase=target_phase,
+            source_entity_name=source_entity_name,
+        )
+
         self._logger.info(
             "Jumping from phase '%s' to phase '%s'", source_phase, target_phase
         )
-        self._state.save_current_phase(target_phase)
+
+        snapshot = self._require_snapshot()
+        self._persist_snapshot(
+            replace(
+                snapshot,
+                jump_stack=(*snapshot.jump_stack, frame),
+                current_phase=target_phase,
+                entity_cursor=None,
+            )
+        )
+
         processor = self._processor_for_phase(self._phases[target_phase])
         await processor.run_phase()
-        self._state.save_current_phase(source_phase)
+
+        self._return_from_jump_frame(frame)
         self._logger.info(
             "Returning to phase '%s' from jump phase '%s'", source_phase, target_phase
         )
@@ -300,6 +362,121 @@ class WorkflowEngine:
         success = await self._hook_runner.run(hook, {}, context)
         if not success:
             raise WorkflowError(f"{context} failed after retries")
+
+    def _load_or_init_snapshot(self, phase_order: tuple[str, ...]) -> RuntimeSnapshot:
+        snapshot = self._state.load_snapshot()
+        if snapshot is None:
+            snapshot = RuntimeSnapshot(
+                schema_version=STATE_SCHEMA_VERSION,
+                current_phase=phase_order[0],
+                jump_stack=(),
+                entity_cursor=None,
+            )
+            self._state.save_snapshot(snapshot)
+            return snapshot
+
+        self._validate_snapshot_phases(snapshot, phase_order)
+        return snapshot
+
+    def _validate_snapshot_phases(
+        self,
+        snapshot: RuntimeSnapshot,
+        phase_order: tuple[str, ...],
+    ) -> None:
+        if snapshot.current_phase not in self._phases:
+            raise WorkflowError(
+                f"State file references unknown phase '{snapshot.current_phase}'. "
+                f"Known phases: {', '.join(phase_order)}"
+            )
+
+        for frame in snapshot.jump_stack:
+            if frame.source_phase not in self._phases or frame.target_phase not in self._phases:
+                raise WorkflowError(
+                    "State file contains jump frame with unknown phases "
+                    f"'{frame.source_phase}->{frame.target_phase}'. "
+                    f"Known phases: {', '.join(phase_order)}"
+                )
+
+        cursor = snapshot.entity_cursor
+        if cursor is not None and cursor.phase not in self._phases:
+            raise WorkflowError(
+                f"State file references unknown cursor phase '{cursor.phase}'. "
+                f"Known phases: {', '.join(phase_order)}"
+            )
+
+    def _unwind_jump_if_target_phase(self, phase_name: str) -> bool:
+        snapshot = self._require_snapshot()
+        if not snapshot.jump_stack:
+            return False
+
+        frame = snapshot.jump_stack[-1]
+        if frame.target_phase != phase_name:
+            return False
+
+        self._logger.info(
+            "Restoring source phase '%s' after resumed jump phase '%s'",
+            frame.source_phase,
+            frame.target_phase,
+        )
+        self._return_from_jump_frame(frame)
+        return True
+
+    def _return_from_jump_frame(self, frame: JumpFrame) -> None:
+        snapshot = self._require_snapshot()
+        if not snapshot.jump_stack or snapshot.jump_stack[-1] != frame:
+            raise WorkflowError(
+                "State file jump stack is inconsistent during jump return"
+            )
+
+        restored_cursor = (
+            None
+            if frame.source_entity_name is None
+            else EntityCursor(phase=frame.source_phase, entity_name=frame.source_entity_name)
+        )
+        self._persist_snapshot(
+            replace(
+                snapshot,
+                jump_stack=snapshot.jump_stack[:-1],
+                current_phase=frame.source_phase,
+                entity_cursor=restored_cursor,
+            )
+        )
+
+    def _set_current_phase(self, phase_name: str) -> None:
+        snapshot = self._require_snapshot()
+        self._persist_snapshot(replace(snapshot, current_phase=phase_name))
+
+    def _load_entity_cursor(self, phase_name: str) -> str | None:
+        cursor = self._require_snapshot().entity_cursor
+        if cursor is None:
+            return None
+        if cursor.phase != phase_name:
+            return None
+        return cursor.entity_name
+
+    def _save_entity_cursor(self, phase_name: str, entity_name: str) -> None:
+        snapshot = self._require_snapshot()
+        cursor = snapshot.entity_cursor
+        if cursor is not None and cursor.phase == phase_name and cursor.entity_name == entity_name:
+            return
+        self._persist_snapshot(
+            replace(snapshot, entity_cursor=EntityCursor(phase=phase_name, entity_name=entity_name))
+        )
+
+    def _clear_entity_cursor(self) -> None:
+        snapshot = self._require_snapshot()
+        if snapshot.entity_cursor is None:
+            return
+        self._persist_snapshot(replace(snapshot, entity_cursor=None))
+
+    def _persist_snapshot(self, snapshot: RuntimeSnapshot) -> None:
+        self._snapshot = snapshot
+        self._state.save_snapshot(snapshot)
+
+    def _require_snapshot(self) -> RuntimeSnapshot:
+        if self._snapshot is None:
+            raise WorkflowError("Runtime snapshot is unavailable")
+        return self._snapshot
 
 
 def _find_transition_from_state(

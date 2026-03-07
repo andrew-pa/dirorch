@@ -279,7 +279,7 @@ Concurrency rule:
 
 ## Runtime State and Resume
 
-Dirorch stores runtime phase state in:
+Dirorch stores runtime execution state in:
 
 - `${root}/${state-file}`
 - default: `.dirorch_runtime.json`
@@ -288,11 +288,27 @@ Example:
 
 ```json
 {
-  "current_phase": "tasks"
+  "schema_version": 2,
+  "current_phase": "tasks",
+  "jump_stack": [],
+  "entity_cursor": null
 }
 ```
 
-On restart, Dirorch resumes from that phase.
+Fields:
+
+- `schema_version`: currently must be `2`.
+- `current_phase`: phase to run next.
+- `jump_stack`: active jump return stack, with each frame containing:
+  - `source_phase`
+  - `target_phase`
+  - `source_entity_name` (optional entity cursor to restore when returning)
+- `entity_cursor`: active entity-mode cursor (`{phase, entity_name}`) or `null`.
+
+On restart, Dirorch resumes using this full context so jump returns and `mode: entity`
+processing continue safely.
+
+State schema is strict: legacy state files are rejected and must be regenerated.
 
 ## Example Workflow (With Jump + Completion)
 

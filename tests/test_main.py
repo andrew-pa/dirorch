@@ -28,6 +28,21 @@ def _run_workflow(
     asyncio.run(run(options))
 
 
+def _state_snapshot(
+    current_phase: str,
+    jump_stack: list[dict[str, object]] | None = None,
+    entity_cursor: dict[str, str] | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "current_phase": current_phase,
+            "jump_stack": jump_stack or [],
+            "entity_cursor": entity_cursor,
+        }
+    )
+
+
 def test_load_workflow_parses_env_retries_and_init(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
@@ -164,7 +179,10 @@ phases:
     assert not (tmp_path / "tasks" / "new" / "a.txt").exists()
 
     state = json.loads((tmp_path / ".dirorch_runtime.json").read_text(encoding="utf-8"))
+    assert state["schema_version"] == 2
     assert state["current_phase"] == "tasks"
+    assert state["jump_stack"] == []
+    assert state["entity_cursor"] is None
 
 
 def test_workflow_env_templates_can_reference_dir_variables(tmp_path: Path) -> None:
@@ -644,11 +662,155 @@ phases:
     subtasks_new.mkdir(parents=True)
     _write(subtasks_new / "s.txt", "s")
 
-    _write(tmp_path / ".dirorch_runtime.json", '{"current_phase":"subtasks"}')
+    _write(
+        tmp_path / ".dirorch_runtime.json",
+        _state_snapshot(current_phase="subtasks"),
+    )
 
     _run_workflow(workflow, tmp_path)
 
     assert (tmp_path / "subtasks" / "done" / "s.txt").exists()
+
+
+def test_runtime_state_rejects_legacy_schema(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+    _write(tmp_path / ".dirorch_runtime.json", '{"current_phase":"tasks"}')
+
+    with pytest.raises(WorkflowError, match="expected fields"):
+        _run_workflow(workflow, tmp_path)
+
+
+def test_resume_unwinds_saved_jump_stack(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cp "$INPUT_ENTITY" "$DIR_SUBTASKS_NEW/sub-$(basename "$INPUT_ENTITY")"
+        jump: subtasks
+  subtasks:
+    states: [new, complete]
+    transitions:
+      - from: new
+        to: complete
+""",
+    )
+    tasks_done = tmp_path / "tasks" / "done"
+    subtasks_new = tmp_path / "subtasks" / "new"
+    tasks_done.mkdir(parents=True)
+    subtasks_new.mkdir(parents=True)
+    _write(tasks_done / "a.txt", "a")
+    _write(subtasks_new / "sub-a.txt", "a")
+
+    _write(
+        tmp_path / ".dirorch_runtime.json",
+        _state_snapshot(
+            current_phase="subtasks",
+            jump_stack=[
+                {
+                    "source_phase": "tasks",
+                    "target_phase": "subtasks",
+                    "source_entity_name": None,
+                }
+            ],
+        ),
+    )
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "subtasks" / "complete" / "sub-a.txt").exists()
+
+
+def test_entity_mode_resume_prioritizes_saved_cursor(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    mode: entity
+    states: [new, mid, done]
+    transitions:
+      - from: new
+        to: mid
+        cmd: >
+          echo "first-$(basename "$INPUT_ENTITY")" >> {trace_file}
+      - from: mid
+        to: done
+        cmd: >
+          echo "second-$(basename "$INPUT_ENTITY")" >> {trace_file}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+    _write(new_dir / "b.txt", "b")
+
+    _write(
+        tmp_path / ".dirorch_runtime.json",
+        _state_snapshot(
+            current_phase="tasks",
+            entity_cursor={"phase": "tasks", "entity_name": "b.txt"},
+        ),
+    )
+
+    _run_workflow(workflow, tmp_path)
+
+    assert trace_file.read_text(encoding="utf-8").splitlines()[:2] == [
+        "first-b.txt",
+        "second-b.txt",
+    ]
+
+
+def test_entity_mode_resume_stale_cursor_auto_heals(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    mode: entity
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _write(
+        tmp_path / ".dirorch_runtime.json",
+        _state_snapshot(
+            current_phase="tasks",
+            entity_cursor={"phase": "tasks", "entity_name": "missing.txt"},
+        ),
+    )
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "a.txt").exists()
+    state = json.loads((tmp_path / ".dirorch_runtime.json").read_text(encoding="utf-8"))
+    assert state["entity_cursor"] is None
 
 
 def test_grouped_numeric_prefix_entities_run_concurrently(tmp_path: Path) -> None:
