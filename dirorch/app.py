@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from .hooks import HookRunner, HookRunnerConfig
 from .models import CliOptions
 from .state import RuntimeStateStore
 from .workflow import WorkflowEngine
+
+WATCH_POLL_INTERVAL_SECONDS = 0.25
 
 
 def resolve_workflow_path(workflow: Path) -> Path:
@@ -63,4 +66,26 @@ async def run(options: CliOptions) -> None:
             logger=logger,
         ),
     )
+    if options.watch:
+        await _run_watch_loop(engine, entities, logger)
+        return
     await engine.run()
+
+
+async def _run_watch_loop(
+    engine: WorkflowEngine,
+    entities: EntityStore,
+    logger,
+) -> None:
+    while True:
+        await engine.run()
+        previous_layout = entities.entity_layout()
+        logger.info("Watch mode idle; waiting for entity layout changes")
+
+        while True:
+            await asyncio.sleep(WATCH_POLL_INTERVAL_SECONDS)
+            current_layout = entities.entity_layout()
+            if current_layout == previous_layout:
+                continue
+            logger.info("Detected entity layout change; resuming workflow")
+            break

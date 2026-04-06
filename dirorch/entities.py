@@ -44,6 +44,14 @@ class EntityStore:
             entities.extend(self._list_entities(self.dir_for(phase.name, state)))
         return sorted(entities, key=lambda path: (path.name, str(path.parent)))
 
+    def entity_layout(self) -> tuple[str, ...]:
+        layout: list[str] = []
+        for phase_state, directory in sorted(self._phase_state_dirs.items()):
+            phase_name, state_name = phase_state
+            for entity in self._list_entities(directory):
+                layout.append(f"{phase_name}/{state_name}/{entity.name}")
+        return tuple(layout)
+
     def group_entities(self, entities: list[Path]) -> list[Group]:
         groups: list[Group] = []
         pending: list[Path] = []

@@ -49,6 +49,7 @@ class CliOptions:
     retries_override: int | None
     state_file: str
     log_level: str
+    watch: bool = False
 
 
 @dataclass(frozen=True)

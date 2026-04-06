@@ -39,6 +39,11 @@ def parse_args() -> CliOptions:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         help="Logging verbosity",
     )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Keep waiting for entity layout changes and rerun the workflow when they happen",
+    )
     args = parser.parse_args()
     if args.retries is not None and args.retries < 0:
         raise SystemExit("--retries must be 0 or greater")
@@ -48,6 +53,7 @@ def parse_args() -> CliOptions:
         retries_override=args.retries,
         state_file=args.state_file,
         log_level=args.log_level,
+        watch=args.watch,
     )
 
 

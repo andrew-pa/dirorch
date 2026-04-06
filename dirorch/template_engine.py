@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ class TemplateRenderer:
             "env": env_vars,
             "read_file": self._read_file,
             "include_file": self._read_file,
+            "read_json": self._read_json,
         }
         try:
             compiled = self._engine.from_string(template)
@@ -47,3 +49,17 @@ class TemplateRenderer:
             return path.read_text(encoding="utf-8")
         except OSError as exc:
             raise TemplateRenderError(f"unable to read file '{path}': {exc}") from exc
+
+    def _read_json(self, raw_path: Any) -> Any:
+        if not isinstance(raw_path, str) or not raw_path:
+            raise TemplateRenderError("read_json path must be a non-empty string")
+
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = self.root / path
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise TemplateRenderError(f"unable to read file '{path}': {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise TemplateRenderError(f"unable to parse JSON file '{path}': {exc}") from exc

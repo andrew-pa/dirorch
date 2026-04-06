@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,15 @@ def _run_workflow(
         log_level=log_level,
     )
     asyncio.run(run(options))
+
+
+async def _wait_for_path(path: Path, timeout: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"Timed out waiting for {path}")
 
 
 def _state_snapshot(
@@ -494,6 +504,97 @@ phases:
     assert rendered[2] == "payload=from-file"
 
 
+def test_transition_hook_stdin_template_can_read_input_entity_json(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "rendered.txt"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cat > "{observed}"
+        stdin: |
+          name={{{{ read_json(INPUT_ENTITY).task.name }}}}
+          priority={{{{ read_json(INPUT_ENTITY)["task"]["priority"] }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "task.json"
+    _write(entity, '{"task":{"name":"ship","priority":3}}')
+
+    _run_workflow(workflow, tmp_path)
+
+    assert observed.read_text(encoding="utf-8").splitlines() == [
+        "name=ship",
+        "priority=3",
+    ]
+
+
+def test_transition_hook_stdin_template_reads_json_lazily(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "rendered.txt"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cat > "{observed}"
+        stdin: |
+          entity={{{{ INPUT_ENTITY }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "task.txt"
+    _write(entity, "not-json")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert observed.read_text(encoding="utf-8").strip() == f"entity={entity.resolve()}"
+    assert (tmp_path / "tasks" / "done" / "task.txt").exists()
+
+
+def test_transition_hook_stdin_template_invalid_input_entity_json_fails(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "rendered.txt"
+    _write(
+        workflow,
+        f"""
+retries: 0
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cat > "{observed}"
+        stdin: |
+          name={{{{ read_json(INPUT_ENTITY).task.name }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "task.txt"
+    _write(entity, "not-json")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / FAILED_STATE / "task.txt").exists()
+    assert not observed.exists()
+
+
 def test_stdin_template_cannot_access_external_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -839,6 +940,60 @@ phases:
 
     # Sequential would be around 0.6s; grouped concurrency should stay under this bound.
     assert elapsed < 0.55
+
+
+def test_watch_mode_reacts_to_new_entities_and_external_moves(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+init: >
+  echo init >> "{trace_file}"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+  review:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+
+    async def scenario() -> None:
+        options = CliOptions(
+            workflow=workflow,
+            root=tmp_path,
+            retries_override=None,
+            state_file=".dirorch_runtime.json",
+            log_level="ERROR",
+            watch=True,
+        )
+        watch_task = asyncio.create_task(run(options))
+        try:
+            await asyncio.sleep(0.4)
+
+            first_entity = tmp_path / "tasks" / "new" / "watch.txt"
+            _write(first_entity, "watch")
+            await _wait_for_path(tmp_path / "tasks" / "done" / "watch.txt")
+
+            moved_entity = tmp_path / "tasks" / "done" / "watch.txt"
+            target = tmp_path / "review" / "new" / "watch.txt"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            moved_entity.rename(target)
+            await _wait_for_path(tmp_path / "review" / "done" / "watch.txt")
+        finally:
+            watch_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await watch_task
+
+    asyncio.run(scenario())
+
+    assert trace_file.read_text(encoding="utf-8").splitlines() == ["init"]
 
 
 def test_cli_invocation_works_end_to_end(tmp_path: Path) -> None:

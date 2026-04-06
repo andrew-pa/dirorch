@@ -275,6 +275,7 @@ class WorkflowEngine:
         self._logger = deps.logger
         self._phases = {phase.name: phase for phase in config.phases}
         self._snapshot: RuntimeSnapshot | None = None
+        self._did_run_init = False
         self._phase_processor_deps = PhaseProcessorDeps(
             hook_runner=deps.hook_runner,
             entities=deps.entities,
@@ -290,7 +291,9 @@ class WorkflowEngine:
 
     async def run(self) -> None:
         self._entities.ensure_layout()
-        await self._run_init()
+        if not self._did_run_init:
+            await self._run_init()
+            self._did_run_init = True
 
         phase_order = self._config.phase_order
         first_phase = phase_order[0]

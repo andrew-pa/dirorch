@@ -27,6 +27,7 @@ The implementation is organized into focused modules under `dirorch/`:
   - one file per entity
 - Runs transitions until each phase reaches fixpoint (no more applicable moves)
 - Supports transition hooks, completion hooks, retries, jump phases, resume-from-state, and grouped concurrency
+- Can stay in `--watch` mode and rerun when entities are added or externally moved
 
 ## Requirements
 
@@ -103,7 +104,7 @@ After completion, entities will be moved into `./work/tasks/done`.
 
 ```text
 dirorch [-h] [--root ROOT] [--retries RETRIES]
-        [--state-file STATE_FILE]
+        [--state-file STATE_FILE] [--watch]
         [--log-level {DEBUG,INFO,WARNING,ERROR}]
         workflow
 ```
@@ -116,6 +117,7 @@ Arguments:
 - `--root`: workflow state root directory (default: current directory)
 - `--retries`: override YAML retry count (`0` means one attempt total)
 - `--state-file`: runtime state filename under `--root` (default: `.dirorch_runtime.json`)
+- `--watch`: keep running, wait for new/moved entities, and rerun rules after each detected change
 - `--log-level`: `DEBUG|INFO|WARNING|ERROR` (default: `INFO`)
 
 ## Workflow YAML Reference
@@ -212,6 +214,10 @@ Template helpers:
 - `read_file(path)` (alias: `include_file(path)`): reads UTF-8 file content and inserts it into the rendered stdin text.
   - relative paths resolve from `--root`
   - you can pass path variables, e.g. `{{ read_file(FILE_TO_INCLUDE) }}`
+- `read_json(path)`: reads and parses a JSON file on demand, returning normal Jinja-accessible objects.
+  - relative paths resolve from `--root`
+  - this is lazy: Dirorch only reads/parses JSON if the template calls `read_json(...)`
+  - useful for entity-backed JSON workflows, e.g. `{{ read_json(INPUT_ENTITY).task.name }}` or `{{ read_json(INPUT_ENTITY)["task"]["priority"] }}`
 
 Env var naming for `DIR_<PHASE>_<STATE>`:
 
