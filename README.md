@@ -197,6 +197,12 @@ Workflow `env` template context includes:
 
 Workflow `env` templates do not include `INPUT_ENTITY`.
 
+Workflow and stdin templates can also use standard Jinja `{% include %}` and `{% import %}` statements for template files under `--root`.
+
+- template names are resolved relative to `--root`
+- Jinja auto-reload is enabled, so updated fragment files are picked up on later renders
+- example: `{% include "templates/common-prompt.j2" %}`
+
 ## Stdin Templates
 
 If a hook defines `stdin`, Dirorch renders it with Jinja2 before piping it into the command.

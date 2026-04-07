@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from dirorch.template_engine import TemplateRenderer
 from main import CliOptions, FAILED_STATE, WorkflowError, load_workflow, run
 
 
@@ -252,6 +253,38 @@ phases:
     _run_workflow(workflow, tmp_path)
 
     assert observed.read_text(encoding="utf-8") == "file-payload"
+
+
+def test_workflow_env_templates_support_jinja_include_from_root(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "observed.txt"
+    fragment = tmp_path / "templates" / "target_path.j2"
+    fragment.parent.mkdir(parents=True)
+    _write(fragment, "{{ DIR_TASKS_DONE }}/target.txt")
+    _write(
+        workflow,
+        f"""
+env:
+  TARGET_PATH: "{{% include 'templates/target_path.j2' %}}"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          printf '%s' "$TARGET_PATH" > "{observed}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "x.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert observed.read_text(encoding="utf-8") == str(
+        (tmp_path / "tasks" / "done" / "target.txt").resolve()
+    )
 
 
 def test_workflow_env_templates_cannot_reference_input_entity(tmp_path: Path) -> None:
@@ -536,6 +569,45 @@ phases:
     ]
 
 
+def test_transition_hook_stdin_template_supports_jinja_import_from_root(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "rendered.txt"
+    macro_file = tmp_path / "templates" / "formatters.j2"
+    macro_file.parent.mkdir(parents=True)
+    _write(
+        macro_file,
+        """
+{% macro render_entity(name) -%}
+entity={{ name.upper() }}
+{%- endmacro %}
+""",
+    )
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cat > "{observed}"
+        stdin: |
+          {{% from 'templates/formatters.j2' import render_entity %}}
+          {{{{ render_entity(read_json(INPUT_ENTITY).task.name) }}}}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "task.json"
+    _write(entity, '{"task":{"name":"ship"}}')
+
+    _run_workflow(workflow, tmp_path)
+
+    assert observed.read_text(encoding="utf-8").strip() == "entity=SHIP"
+
+
 def test_transition_hook_stdin_template_reads_json_lazily(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     observed = tmp_path / "rendered.txt"
@@ -563,6 +635,25 @@ phases:
 
     assert observed.read_text(encoding="utf-8").strip() == f"entity={entity.resolve()}"
     assert (tmp_path / "tasks" / "done" / "task.txt").exists()
+
+
+def test_template_renderer_auto_reloads_included_fragments(tmp_path: Path) -> None:
+    fragment = tmp_path / "templates" / "snippet.j2"
+    fragment.parent.mkdir(parents=True)
+    _write(fragment, "version-one")
+    renderer = TemplateRenderer(tmp_path)
+    template = "{% include 'templates/snippet.j2' %}"
+
+    assert renderer.render(template, {}) == "version-one"
+
+    previous_mtime = fragment.stat().st_mtime_ns
+    while True:
+        _write(fragment, "version-two")
+        if fragment.stat().st_mtime_ns != previous_mtime:
+            break
+        time.sleep(0.01)
+
+    assert renderer.render(template, {}) == "version-two"
 
 
 def test_transition_hook_stdin_template_invalid_input_entity_json_fails(tmp_path: Path) -> None:

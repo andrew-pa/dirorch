@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jinja2 import FileSystemLoader
 from jinja2 import StrictUndefined, TemplateError
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -20,7 +21,9 @@ class TemplateRenderer:
     def __post_init__(self) -> None:
         self._engine = SandboxedEnvironment(
             autoescape=False,
+            loader=FileSystemLoader(str(self.root)),
             keep_trailing_newline=True,
+            auto_reload=True,
             undefined=StrictUndefined,
         )
 
