@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .constants import FAILED_STATE, PHASE_MODE_ENTITY, PHASE_MODE_TRANSITIONS
 from .entities import EntityStore
+from .execution import NullExecutionObserver
 from .errors import WorkflowError
 from .hooks import HookRunner
 from .models import (
@@ -30,6 +31,7 @@ JumpHandler = Callable[[str, str], Awaitable[None]]
 EntityCursorLoader = Callable[[str], str | None]
 EntityCursorSaver = Callable[[str, str], None]
 EntityCursorClearer = Callable[[], None]
+EntityLockChecker = Callable[[str], bool]
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,8 @@ class PhaseProcessorDeps:
     load_entity_cursor: EntityCursorLoader
     save_entity_cursor: EntityCursorSaver
     clear_entity_cursor: EntityCursorClearer
+    execution_observer: NullExecutionObserver
+    is_entity_locked: EntityLockChecker
 
 
 class PhaseProcessor:
@@ -54,27 +58,37 @@ class PhaseProcessor:
         self._load_entity_cursor = deps.load_entity_cursor
         self._save_entity_cursor = deps.save_entity_cursor
         self._clear_entity_cursor = deps.clear_entity_cursor
+        self._execution_observer = deps.execution_observer
+        self._is_entity_locked = deps.is_entity_locked
         self.config = config
 
     async def _run(self) -> int:
         raise NotImplementedError()
 
     async def run_phase(self) -> int:
+        self._execution_observer.phase_started(self.config.name, self.config.mode)
         self._logger.info("Processing phase '%s' (mode: %s)", self.config.name, self.config.mode)
-        moved_total = await self._run()
-        await self._run_completions()
-        self._logger.info(
-            "Phase '%s' reached fixpoint; transitions=%d", self.config.name, moved_total
-        )
-        return moved_total
+        try:
+            moved_total = await self._run()
+            await self._run_completions()
+            self._logger.info(
+                "Phase '%s' reached fixpoint; transitions=%d", self.config.name, moved_total
+            )
+            return moved_total
+        finally:
+            self._execution_observer.phase_completed(self.config.name)
 
     async def _run_completions(self) -> None:
         for index, hook in enumerate(self.config.completions, start=1):
             context = f"completion hook {self.config.name}[{index}]"
             self._logger.info("Running %s", context)
-            success = await self._hook_runner.run(hook, {}, context)
-            if not success:
-                raise WorkflowError(f"{context} failed after retries")
+            self._execution_observer.completion_started(self.config.name, index)
+            try:
+                success = await self._hook_runner.run(hook, {}, context)
+                if not success:
+                    raise WorkflowError(f"{context} failed after retries")
+            finally:
+                self._execution_observer.completion_finished(self.config.name, index)
 
     async def _process_entity(
         self,
@@ -142,6 +156,9 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
         entities = self._entities.list_transition_entities(
             self.config.name, transition.source
         )
+        entities = [
+            entity for entity in entities if not self._is_entity_locked(entity.name)
+        ]
         if not entities:
             return 0, []
 
@@ -170,15 +187,47 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                 len(group.entities),
                 group.key,
             )
+            entity_ids = tuple(entity.name for entity in group.entities)
+            self._execution_observer.transition_started(
+                self.config.name,
+                self.config.mode,
+                transition.source,
+                transition.destination,
+                entity_ids,
+            )
             tasks = [
                 self._process_entity(transition, entity)
                 for entity in group.entities
             ]
-            return list(await asyncio.gather(*tasks))
-        return [
-            await self._process_entity(transition, entity)
-            for entity in group.entities
-        ]
+            try:
+                return list(await asyncio.gather(*tasks))
+            finally:
+                self._execution_observer.transition_finished(
+                    self.config.name,
+                    transition.source,
+                    transition.destination,
+                    entity_ids,
+                )
+        entity_ids = (group.entities[0].name,)
+        self._execution_observer.transition_started(
+            self.config.name,
+            self.config.mode,
+            transition.source,
+            transition.destination,
+            entity_ids,
+        )
+        try:
+            return [
+                await self._process_entity(transition, entity)
+                for entity in group.entities
+            ]
+        finally:
+            self._execution_observer.transition_finished(
+                self.config.name,
+                transition.source,
+                transition.destination,
+                entity_ids,
+            )
 
 
 class OneAtATimePhaseProcessor(PhaseProcessor):
@@ -197,18 +246,33 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
 
     def _entities_for_pass(self) -> list[Path]:
         entities = self._entities.list_phase_entities(self.config)
+        unlocked_entities = [
+            entity for entity in entities if not self._is_entity_locked(entity.name)
+        ]
         cursor_name = self._load_entity_cursor(self.config.name)
         if cursor_name is None:
-            return entities
+            return unlocked_entities
 
-        for entity in entities:
+        for entity in unlocked_entities:
             if entity.name == cursor_name:
                 self._logger.info(
                     "Resuming entity cursor '%s' in phase '%s'",
                     cursor_name,
                     self.config.name,
                 )
-                return [entity] + [candidate for candidate in entities if candidate != entity]
+                return [entity] + [
+                    candidate for candidate in unlocked_entities if candidate != entity
+                ]
+
+        for entity in entities:
+            if entity.name == cursor_name and self._is_entity_locked(entity.name):
+                self._logger.info(
+                    "State cursor '%s' in phase '%s' is locked; clearing cursor",
+                    cursor_name,
+                    self.config.name,
+                )
+                self._clear_entity_cursor()
+                return unlocked_entities
 
         self._logger.warning(
             "State cursor for phase '%s' entity '%s' is stale; clearing and continuing",
@@ -216,7 +280,7 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
             cursor_name,
         )
         self._clear_entity_cursor()
-        return entities
+        return unlocked_entities
 
     async def _flow_entity_to_rest(self, entity: Path) -> int:
         if not entity.exists():
@@ -233,7 +297,23 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
                 self._clear_entity_cursor()
                 return moved
 
-            result = await self._process_entity(transition, current)
+            entity_ids = (current.name,)
+            self._execution_observer.transition_started(
+                self.config.name,
+                self.config.mode,
+                transition.source,
+                transition.destination,
+                entity_ids,
+            )
+            try:
+                result = await self._process_entity(transition, current)
+            finally:
+                self._execution_observer.transition_finished(
+                    self.config.name,
+                    transition.source,
+                    transition.destination,
+                    entity_ids,
+                )
             if not result.moved:
                 self._clear_entity_cursor()
                 return moved
@@ -262,6 +342,8 @@ class WorkflowEngine:
         entities: EntityStore
         hook_runner: HookRunner
         logger: logging.Logger
+        execution_observer: NullExecutionObserver | None = None
+        is_entity_locked: EntityLockChecker | None = None
 
     def __init__(
         self,
@@ -276,6 +358,8 @@ class WorkflowEngine:
         self._phases = {phase.name: phase for phase in config.phases}
         self._snapshot: RuntimeSnapshot | None = None
         self._did_run_init = False
+        execution_observer = deps.execution_observer or NullExecutionObserver()
+        is_entity_locked = deps.is_entity_locked or (lambda _entity_id: False)
         self._phase_processor_deps = PhaseProcessorDeps(
             hook_runner=deps.hook_runner,
             entities=deps.entities,
@@ -284,7 +368,10 @@ class WorkflowEngine:
             load_entity_cursor=self._load_entity_cursor,
             save_entity_cursor=self._save_entity_cursor,
             clear_entity_cursor=self._clear_entity_cursor,
+            execution_observer=execution_observer,
+            is_entity_locked=is_entity_locked,
         )
+        self._execution_observer = execution_observer
 
     def _processor_for_phase(self, phase: PhaseConfig) -> PhaseProcessor:
         return PHASE_PROCESSOR_FOR_MODE[phase.mode](self._phase_processor_deps, phase)
@@ -336,6 +423,7 @@ class WorkflowEngine:
         self._logger.info(
             "Jumping from phase '%s' to phase '%s'", source_phase, target_phase
         )
+        self._execution_observer.jump_started(source_phase, target_phase)
 
         snapshot = self._require_snapshot()
         self._persist_snapshot(
@@ -348,12 +436,14 @@ class WorkflowEngine:
         )
 
         processor = self._processor_for_phase(self._phases[target_phase])
-        await processor.run_phase()
-
-        self._return_from_jump_frame(frame)
-        self._logger.info(
-            "Returning to phase '%s' from jump phase '%s'", source_phase, target_phase
-        )
+        try:
+            await processor.run_phase()
+        finally:
+            self._return_from_jump_frame(frame)
+            self._execution_observer.jump_finished(source_phase, target_phase)
+            self._logger.info(
+                "Returning to phase '%s' from jump phase '%s'", source_phase, target_phase
+            )
 
     async def _run_init(self) -> None:
         hook = self._config.init
@@ -362,9 +452,13 @@ class WorkflowEngine:
 
         context = "init hook"
         self._logger.info("Running %s", context)
-        success = await self._hook_runner.run(hook, {}, context)
-        if not success:
-            raise WorkflowError(f"{context} failed after retries")
+        self._execution_observer.init_started()
+        try:
+            success = await self._hook_runner.run(hook, {}, context)
+            if not success:
+                raise WorkflowError(f"{context} failed after retries")
+        finally:
+            self._execution_observer.init_finished()
 
     def _load_or_init_snapshot(self, phase_order: tuple[str, ...]) -> RuntimeSnapshot:
         snapshot = self._state.load_snapshot()

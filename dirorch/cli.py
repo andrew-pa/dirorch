@@ -4,6 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from .constants import DEFAULT_WEB_HOST, DEFAULT_WEB_PORT
 from .models import CliOptions
 
 
@@ -44,9 +45,27 @@ def parse_args() -> CliOptions:
         action="store_true",
         help="Keep waiting for entity layout changes and rerun the workflow when they happen",
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Enable the HTTP API server alongside workflow execution",
+    )
+    parser.add_argument(
+        "--web-host",
+        default=DEFAULT_WEB_HOST,
+        help=f"Host interface for the HTTP API server (default: {DEFAULT_WEB_HOST})",
+    )
+    parser.add_argument(
+        "--web-port",
+        type=int,
+        default=DEFAULT_WEB_PORT,
+        help=f"Port for the HTTP API server (default: {DEFAULT_WEB_PORT})",
+    )
     args = parser.parse_args()
     if args.retries is not None and args.retries < 0:
         raise SystemExit("--retries must be 0 or greater")
+    if args.web_port < 1 or args.web_port > 65535:
+        raise SystemExit("--web-port must be between 1 and 65535")
     return CliOptions(
         workflow=args.workflow,
         root=args.root,
@@ -54,6 +73,9 @@ def parse_args() -> CliOptions:
         state_file=args.state_file,
         log_level=args.log_level,
         watch=args.watch,
+        web=args.web,
+        web_host=args.web_host,
+        web_port=args.web_port,
     )
 
 

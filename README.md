@@ -32,6 +32,7 @@ The implementation is organized into focused modules under `dirorch/`:
 ## Requirements
 
 - Python `>=3.11`
+- `aiohttp>=3.12.14`
 - `pyyaml>=6.0.2`
 
 ## Installation
@@ -104,7 +105,8 @@ After completion, entities will be moved into `./work/tasks/done`.
 
 ```text
 dirorch [-h] [--root ROOT] [--retries RETRIES]
-        [--state-file STATE_FILE] [--watch]
+        [--state-file STATE_FILE] [--watch] [--web]
+        [--web-host WEB_HOST] [--web-port WEB_PORT]
         [--log-level {DEBUG,INFO,WARNING,ERROR}]
         workflow
 ```
@@ -118,7 +120,44 @@ Arguments:
 - `--retries`: override YAML retry count (`0` means one attempt total)
 - `--state-file`: runtime state filename under `--root` (default: `.dirorch_runtime.json`)
 - `--watch`: keep running, wait for new/moved entities, and rerun rules after each detected change
+- `--web`: enable the HTTP API server
+- `--web-host`: bind host for the HTTP API server (default: `127.0.0.1`)
+- `--web-port`: bind port for the HTTP API server (default: `8000`)
 - `--log-level`: `DEBUG|INFO|WARNING|ERROR` (default: `INFO`)
+
+When `--web` is enabled without `--watch`, Dirorch still runs the workflow immediately, but the process stays alive after that pass completes so the API remains available until shutdown.
+
+## HTTP API
+
+Enable the API server with:
+
+```bash
+dirorch ./workflow.yaml --root ./work --web
+```
+
+Or with an explicit bind address:
+
+```bash
+dirorch ./workflow.yaml --root ./work --web --web-host 0.0.0.0 --web-port 9000
+```
+
+Available endpoints:
+
+- `GET /workflow`: workflow structure, phase order, states, transitions, and configured hooks
+- `GET /status/workflow`: persisted runtime snapshot, entity counts, locks, and current execution activity
+- `GET /status/entities`: entity list with phase/state, lock state, and processing flag
+- `GET /entity/{id}`: entity metadata plus file contents
+- `POST /entity`: create an entity
+- `PUT /entity/{id}`: update entity contents and/or move it to another phase/state
+- `PUT /entity/{id}/lock`: lock or unlock an entity
+- `DELETE /entity/{id}`: delete an entity
+- `GET|POST|PUT|DELETE /file/{path...}`: CRUD for other root-scoped UTF-8 text and JSON files
+
+Locking behavior:
+
+- Locked entities are excluded from workflow transitions until they are unlocked.
+- Locks are persisted separately from runtime state in `${root}/.dirorch_locks.json`.
+- The generic `/file` API cannot modify Dirorch-managed entity directories, the runtime state file, or the lock file.
 
 ## Workflow YAML Reference
 

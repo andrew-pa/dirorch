@@ -16,6 +16,7 @@ class EntityStore:
 
     def __init__(self, root: Path, config: WorkflowConfig) -> None:
         self._root = root
+        self._config = config
         self._phase_state_dirs = self._build_phase_dirs(config)
 
     def ensure_layout(self) -> None:
@@ -74,7 +75,49 @@ class EntityStore:
             groups.append(Group(tuple(pending), pending_key))
         return groups
 
+    def list_all_entities(self) -> list[Path]:
+        entities: list[Path] = []
+        for directory in self._phase_state_dirs.values():
+            entities.extend(self._list_entities(directory))
+        return sorted(entities, key=lambda path: (path.name, str(path.parent)))
+
+    def locate_entities(self, entity_id: str) -> list[Path]:
+        matches = [
+            entity for entity in self.list_all_entities() if entity.name == entity_id
+        ]
+        return matches
+
+    def phase_state_for(self, entity: Path) -> tuple[str, str]:
+        for (phase_name, state_name), directory in self._phase_state_dirs.items():
+            if entity.parent == directory:
+                return phase_name, state_name
+        raise ValueError(f"Entity {entity} is not under a known phase/state directory")
+
+    def read_text(self, entity: Path) -> str:
+        return entity.read_text(encoding="utf-8")
+
+    def create(self, phase_name: str, state_name: str, entity_id: str, content: str) -> Path:
+        path = self.dir_for(phase_name, state_name) / entity_id
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def update_contents(self, entity: Path, content: str) -> Path:
+        entity.write_text(content, encoding="utf-8")
+        return entity
+
+    def delete(self, entity: Path) -> None:
+        entity.unlink()
+
+    def is_valid_state(self, phase_name: str, state_name: str) -> bool:
+        return (phase_name, state_name) in self._phase_state_dirs
+
+    def phase_names(self) -> tuple[str, ...]:
+        return self._config.phase_order
+
     def _list_entities(self, source_dir: Path) -> list[Path]:
+        if not source_dir.exists():
+            return []
         entities = [path for path in source_dir.iterdir() if path.is_file()]
         return sorted(entities, key=lambda path: path.name)
 

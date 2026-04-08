@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import PHASE_MODE_TRANSITIONS
+from .constants import DEFAULT_WEB_HOST, DEFAULT_WEB_PORT, PHASE_MODE_TRANSITIONS
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,9 @@ class CliOptions:
     state_file: str
     log_level: str
     watch: bool = False
+    web: bool = False
+    web_host: str = DEFAULT_WEB_HOST
+    web_port: int = DEFAULT_WEB_PORT
 
 
 @dataclass(frozen=True)
