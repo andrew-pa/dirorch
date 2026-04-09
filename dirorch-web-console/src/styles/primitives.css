@@ -1,7 +1,10 @@
 .surface {
   border: 1px solid var(--border);
-  background: var(--surface);
+  background:
+    linear-gradient(180deg, rgba(20, 29, 41, 0.94), rgba(9, 15, 24, 0.94)),
+    var(--surface);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
 }
 
 .surface--padding-none {
@@ -21,25 +24,25 @@
 }
 
 .surface--radius-sm {
-  border-radius: 0.58rem;
+  border-radius: 0.08rem;
 }
 
 .surface--radius-md {
-  border-radius: 0.75rem;
+  border-radius: 0.12rem;
 }
 
 .surface--radius-lg {
-  border-radius: 0.85rem;
+  border-radius: 0.16rem;
 }
 
 .surface--radius-xl {
-  border-radius: 1.15rem;
+  border-radius: 0.2rem;
 }
 
 .eyebrow {
-  color: var(--text-soft);
+  color: var(--accent-strong);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.2em;
   font-size: 0.72rem;
   font-weight: 600;
 }
@@ -84,7 +87,7 @@
 
 .info-card {
   min-height: 0;
-  backdrop-filter: blur(10px);
+  position: relative;
 }
 
 .info-card__value {
@@ -92,6 +95,7 @@
   font-size: 0.92rem;
   font-weight: 600;
   line-height: 1.15;
+  text-shadow: 0 0 12px rgba(69, 232, 255, 0.14);
 }
 
 .info-card__meta {

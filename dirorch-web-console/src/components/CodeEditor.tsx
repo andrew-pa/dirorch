@@ -25,7 +25,7 @@ export function CodeEditor({
         <MonacoEditor
           height={height}
           language={language}
-          theme="vs"
+          theme="vs-dark"
           value={value}
           onChange={(nextValue) => onChange(nextValue ?? '')}
           options={{
