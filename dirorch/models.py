@@ -51,6 +51,7 @@ class CliOptions:
     log_level: str
     watch: bool = False
     web: bool = False
+    web_log: bool = False
     web_host: str = DEFAULT_WEB_HOST
     web_port: int = DEFAULT_WEB_PORT
 

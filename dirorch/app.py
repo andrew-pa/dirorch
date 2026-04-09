@@ -203,6 +203,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             build_web_app(services),
             options.web_host,
             options.web_port,
+            access_log_enabled=options.web_log,
         )
 
     return RuntimeContext(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,15 +60,20 @@ class WebServer:
         app: web.Application,
         host: str,
         port: int,
+        access_log_enabled: bool = False,
     ) -> None:
         self._app = app
         self._host = host
         self._port = port
+        self._access_log_enabled = access_log_enabled
         self._runner: web.AppRunner | None = None
         self._site: web.BaseSite | None = None
 
     async def start(self) -> None:
-        self._runner = web.AppRunner(self._app)
+        access_log = logging.getLogger("aiohttp.access")
+        if not self._access_log_enabled:
+            access_log = None
+        self._runner = web.AppRunner(self._app, access_log=access_log)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, self._host, self._port)
         await self._site.start()

@@ -106,7 +106,7 @@ After completion, entities will be moved into `./work/tasks/done`.
 ```text
 dirorch [-h] [--root ROOT] [--retries RETRIES]
         [--state-file STATE_FILE] [--watch] [--web]
-        [--web-host WEB_HOST] [--web-port WEB_PORT]
+        [--web-log] [--web-host WEB_HOST] [--web-port WEB_PORT]
         [--log-level {DEBUG,INFO,WARNING,ERROR}]
         workflow
 ```
@@ -121,6 +121,7 @@ Arguments:
 - `--state-file`: runtime state filename under `--root` (default: `.dirorch_runtime.json`)
 - `--watch`: keep running, wait for new/moved entities, and rerun rules after each detected change
 - `--web`: enable the HTTP API server
+- `--web-log`: enable HTTP access logging for the API server (disabled by default)
 - `--web-host`: bind host for the HTTP API server (default: `127.0.0.1`)
 - `--web-port`: bind port for the HTTP API server (default: `8000`)
 - `--log-level`: `DEBUG|INFO|WARNING|ERROR` (default: `INFO`)
@@ -138,7 +139,7 @@ dirorch ./workflow.yaml --root ./work --web
 Or with an explicit bind address:
 
 ```bash
-dirorch ./workflow.yaml --root ./work --web --web-host 0.0.0.0 --web-port 9000
+dirorch ./workflow.yaml --root ./work --web --web-log --web-host 0.0.0.0 --web-port 9000
 ```
 
 Available endpoints:

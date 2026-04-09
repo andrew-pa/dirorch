@@ -8,6 +8,12 @@ Example startup:
 dirorch ./workflow.yaml --root ./work --web
 ```
 
+Enable HTTP access logging explicitly with:
+
+```bash
+dirorch ./workflow.yaml --root ./work --web --web-log
+```
+
 Default bind address:
 
 - host: `127.0.0.1`

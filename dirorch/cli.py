@@ -51,6 +51,11 @@ def parse_args() -> CliOptions:
         help="Enable the HTTP API server alongside workflow execution",
     )
     parser.add_argument(
+        "--web-log",
+        action="store_true",
+        help="Enable HTTP access logging for the API server",
+    )
+    parser.add_argument(
         "--web-host",
         default=DEFAULT_WEB_HOST,
         help=f"Host interface for the HTTP API server (default: {DEFAULT_WEB_HOST})",
@@ -74,6 +79,7 @@ def parse_args() -> CliOptions:
         log_level=args.log_level,
         watch=args.watch,
         web=args.web,
+        web_log=args.web_log,
         web_host=args.web_host,
         web_port=args.web_port,
     )

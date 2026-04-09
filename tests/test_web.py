@@ -4,12 +4,15 @@ import socket
 import sys
 from contextlib import suppress
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
+from aiohttp import web
 from yarl import URL
 
 from dirorch.cli import parse_args
 from dirorch.constants import LOCKS_FILE_NAME
+from dirorch.web.app import WebServer
 from main import CliOptions, run
 
 
@@ -94,6 +97,7 @@ def test_parse_args_supports_web_flags(monkeypatch) -> None:
             "dirorch",
             "workflow.yml",
             "--web",
+            "--web-log",
             "--web-host",
             "0.0.0.0",
             "--web-port",
@@ -104,8 +108,46 @@ def test_parse_args_supports_web_flags(monkeypatch) -> None:
     options = parse_args()
 
     assert options.web is True
+    assert options.web_log is True
     assert options.web_host == "0.0.0.0"
     assert options.web_port == 9001
+
+
+def test_web_server_disables_access_logging_by_default() -> None:
+    async def scenario() -> None:
+        runner = AsyncMock()
+        site = AsyncMock()
+        with (
+            patch("dirorch.web.app.web.AppRunner", return_value=runner) as app_runner,
+            patch("dirorch.web.app.web.TCPSite", return_value=site),
+        ):
+            server = WebServer(web.Application(), "127.0.0.1", 8000)
+            await server.start()
+
+        assert app_runner.call_args.kwargs["access_log"] is None
+
+    asyncio.run(scenario())
+
+
+def test_web_server_enables_access_logging_with_flag() -> None:
+    async def scenario() -> None:
+        runner = AsyncMock()
+        site = AsyncMock()
+        with (
+            patch("dirorch.web.app.web.AppRunner", return_value=runner) as app_runner,
+            patch("dirorch.web.app.web.TCPSite", return_value=site),
+        ):
+            server = WebServer(
+                web.Application(),
+                "127.0.0.1",
+                8000,
+                access_log_enabled=True,
+            )
+            await server.start()
+
+        assert app_runner.call_args.kwargs["access_log"] is not None
+
+    asyncio.run(scenario())
 
 
 def test_web_api_supports_entity_and_file_crud(tmp_path: Path) -> None:
