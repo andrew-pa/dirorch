@@ -1,0 +1,128 @@
+export type ContentFormat = 'text' | 'json'
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
+export interface TransitionDefinition {
+  from: string
+  to: string
+  cmd: string | null
+  jump: string | null
+}
+
+export interface CompletionHook {
+  cmd: string
+  stdin: string | null
+}
+
+export interface PhaseDefinition {
+  name: string
+  mode: string
+  states: string[]
+  reserved_states: string[]
+  transitions: TransitionDefinition[]
+  completions: CompletionHook[]
+}
+
+export interface WorkflowDefinition {
+  phase_order: string[]
+  environment: Record<string, string>
+  retries: number
+  init: CompletionHook | null
+  phases: PhaseDefinition[]
+}
+
+export interface EntitySummary {
+  id: string
+  phase: string
+  state: string
+  locked: boolean
+  processing: boolean
+  format: ContentFormat
+}
+
+export interface EntityDetail extends EntitySummary {
+  content: string
+  json?: JsonValue
+}
+
+export interface FileDetail {
+  path: string
+  format: ContentFormat
+  content: string
+  json?: JsonValue
+}
+
+export interface RuntimeJumpFrame {
+  source_phase: string
+  target_phase: string
+  source_entity_name: string | null
+}
+
+export interface RuntimeEntityCursor {
+  phase: string
+  entity_name: string
+}
+
+export interface RuntimeSnapshot {
+  schema_version: number
+  current_phase: string
+  jump_stack: RuntimeJumpFrame[]
+  entity_cursor: RuntimeEntityCursor | null
+}
+
+export interface ExecutionActivity {
+  kind: 'init' | 'completion' | 'transition' | null
+  phase: string | null
+  phase_mode: string | null
+  source_state: string | null
+  destination_state: string | null
+  entity_ids: string[]
+  details: string | null
+}
+
+export interface ExecutionStatus {
+  runner_state: 'idle' | 'running' | 'stopped' | 'failed'
+  current_phase: string | null
+  current_phase_mode: string | null
+  activity: ExecutionActivity
+  jump_stack: RuntimeJumpFrame[]
+  last_error: string | null
+}
+
+export interface WorkflowStatusPayload {
+  runtime_snapshot: RuntimeSnapshot | null
+  counts: Record<string, Record<string, number>>
+  locked_entities: number
+  execution: ExecutionStatus
+}
+
+export interface EntityStatusPayload {
+  entities: EntitySummary[]
+}
+
+export interface CreateEntityPayload {
+  id: string
+  phase: string
+  state: string
+  format: ContentFormat
+  content: string
+}
+
+export interface UpdateEntityPayload {
+  phase?: string
+  state?: string
+  format?: ContentFormat
+  content?: string
+}
+
+export interface WriteFilePayload {
+  format: ContentFormat
+  content: string
+}
+
