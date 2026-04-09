@@ -6,6 +6,7 @@ import { ApiError, getEntities, getWorkflow, getWorkflowStatus, queryKeys } from
 import type { EntitySummary } from './api/types'
 import { EntityEditorModal } from './components/EntityEditorModal'
 import { WorkflowOverview } from './components/WorkflowOverview'
+import { EmptyState } from './components/ui/EmptyState'
 import './App.css'
 
 type ModalState =
@@ -56,8 +57,9 @@ export default function App() {
   if (loading) {
     return (
       <main className="app-state">
-        <LoaderCircle className="spin" size={18} />
-        <span>Loading workflow console</span>
+        <EmptyState icon={<LoaderCircle className="spin" size={18} />}>
+          Loading workflow console
+        </EmptyState>
       </main>
     )
   }
@@ -65,8 +67,7 @@ export default function App() {
   if (error) {
     return (
       <main className="app-state app-state--error">
-        <AlertTriangle size={18} />
-        <span>{formatError(error)}</span>
+        <EmptyState icon={<AlertTriangle size={18} />}>{formatError(error)}</EmptyState>
         <button className="button button--ghost" type="button" onClick={() => void handleRefresh()}>
           Retry
         </button>

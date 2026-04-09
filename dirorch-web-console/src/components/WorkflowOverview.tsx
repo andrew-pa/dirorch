@@ -33,6 +33,9 @@ import {
   stateNamesForPhase,
 } from '../lib/entities'
 import { Tooltip } from './Tooltip'
+import { InfoCard } from './ui/InfoCard'
+import { SectionHeader } from './ui/SectionHeader'
+import { Surface } from './ui/Surface'
 
 interface WorkflowOverviewProps {
   entities: EntitySummary[]
@@ -70,17 +73,17 @@ export function WorkflowOverview({
   return (
     <div className="console-shell">
       <header className="console-header">
-        <div className="console-header__brand">
-          <div className="console-header__eyebrow">Dirorch Console</div>
-          <h1 className="console-header__title">Workflow</h1>
-        </div>
-
-        <div className="console-header__actions">
-          <button className="button button--ghost" type="button" onClick={onRefresh}>
-            <RefreshCw className={isRefreshing ? 'spin' : undefined} size={16} />
-            Refresh
-          </button>
-        </div>
+        <SectionHeader
+          contentClassName="console-header__brand"
+          eyebrow="Dirorch Console"
+          title={<h1 className="console-header__title">Workflow</h1>}
+          actions={
+            <button className="button button--ghost" type="button" onClick={onRefresh}>
+              <RefreshCw className={isRefreshing ? 'spin' : undefined} size={16} />
+              Refresh
+            </button>
+          }
+        />
       </header>
 
       <section className={clsx('runtime-panel', runtimeCollapsed && 'runtime-panel--collapsed')}>
@@ -91,7 +94,7 @@ export function WorkflowOverview({
           onClick={() => setRuntimeCollapsed((current) => !current)}
         >
           <div className="runtime-panel__summary">
-            <span className="panel-eyebrow">System status</span>
+            <span className="eyebrow">System status</span>
             <span className="runtime-panel__headline">
               {runtimeCollapsed ? runtimeSummary : 'Status overview'}
             </span>
@@ -103,39 +106,36 @@ export function WorkflowOverview({
 
         {!runtimeCollapsed ? (
           <div className="runtime-panel__cards">
-            <div className="runtime-card">
-              <div className="panel-eyebrow">Runtime</div>
-              <div className="runtime-card__value">
-                {status.execution.runner_state} · {activityLabel(status.execution)}
-              </div>
-              <div className="runtime-card__meta">
-                {status.execution.current_phase ?? 'No active phase'}
-                {status.execution.current_phase_mode
-                  ? ` · ${status.execution.current_phase_mode}`
-                  : ''}
-              </div>
-            </div>
+            <InfoCard
+              label="Runtime"
+              value={
+                <>
+                  {status.execution.runner_state} · {activityLabel(status.execution)}
+                </>
+              }
+              meta={
+                <>
+                  {status.execution.current_phase ?? 'No active phase'}
+                  {status.execution.current_phase_mode
+                    ? ` · ${status.execution.current_phase_mode}`
+                    : ''}
+                </>
+              }
+            />
 
-            <div className="runtime-card">
-              <div className="panel-eyebrow">Cursor</div>
-              <div className="runtime-card__value">
-                {cursorEntity ? cursorEntity.id : 'None'}
-              </div>
-              <div className="runtime-card__meta">
-                {cursorEntity ? `${cursorEntity.phase}/${cursorEntity.state}` : 'No entity cursor'}
-              </div>
-            </div>
+            <InfoCard
+              label="Cursor"
+              value={cursorEntity ? cursorEntity.id : 'None'}
+              meta={cursorEntity ? `${cursorEntity.phase}/${cursorEntity.state}` : 'No entity cursor'}
+            />
 
-            <div className="runtime-card">
-              <div className="panel-eyebrow">Locks</div>
-              <div className="runtime-card__value">{status.locked_entities}</div>
-              <div className="runtime-card__meta">
-                {activeIds.length > 0 ? `${activeIds.length} running` : 'No active entities'}
-              </div>
-            </div>
+            <InfoCard
+              label="Locks"
+              value={status.locked_entities}
+              meta={activeIds.length > 0 ? `${activeIds.length} running` : 'No active entities'}
+            />
 
-            <div className="runtime-card">
-              <div className="panel-eyebrow">Jump stack</div>
+            <InfoCard label="Jump stack">
               {status.execution.jump_stack.length > 0 ? (
                 <div className="jump-stack">
                   {status.execution.jump_stack.map((frame, index) => (
@@ -146,9 +146,9 @@ export function WorkflowOverview({
                   ))}
                 </div>
               ) : (
-                <div className="runtime-card__meta">Empty</div>
+                <div className="info-card__meta">Empty</div>
               )}
-            </div>
+            </InfoCard>
           </div>
         ) : null}
       </section>
@@ -205,42 +205,47 @@ function PhasePanel({
   const connectorHeight = phase.transitions.length > 0 ? 18 : 0
 
   return (
-    <article
+    <Surface
+      as="article"
       className={clsx(
         'phase-row',
         status.execution.current_phase === phase.name && 'phase-row--current',
       )}
     >
-      <header className="phase-row__header">
-        <div className="phase-row__title">
-          <h2>{phase.name}</h2>
-          <span className="status-pill status-pill--neutral">
-            <Waypoints size={14} />
-            {phase.mode}
-          </span>
-        </div>
-
-        <div className="phase-row__meta">
-          <span className="status-pill status-pill--neutral">
-            <Activity size={14} />
-            {stateNames.reduce(
-              (total, stateName) => total + stateCount(status.counts, phase.name, stateName),
-              0,
-            )}{' '}
-            entities
-          </span>
-          <span className="status-pill status-pill--neutral">
-            <ArrowRight size={14} />
-            {phase.transitions.length} transitions
-          </span>
-          {status.execution.current_phase === phase.name ? (
-            <span className="status-pill status-pill--success">
-              <Play size={14} />
-              Active phase
+      <SectionHeader
+        className="phase-row__header"
+        title={
+          <div className="phase-row__title">
+            <h2>{phase.name}</h2>
+            <span className="status-pill status-pill--neutral">
+              <Waypoints size={14} />
+              {phase.mode}
             </span>
-          ) : null}
-        </div>
-      </header>
+          </div>
+        }
+        actions={
+          <div className="phase-row__meta">
+            <span className="status-pill status-pill--neutral">
+              <Activity size={14} />
+              {stateNames.reduce(
+                (total, stateName) => total + stateCount(status.counts, phase.name, stateName),
+                0,
+              )}{' '}
+              entities
+            </span>
+            <span className="status-pill status-pill--neutral">
+              <ArrowRight size={14} />
+              {phase.transitions.length} transitions
+            </span>
+            {status.execution.current_phase === phase.name ? (
+              <span className="status-pill status-pill--success">
+                <Play size={14} />
+                Active phase
+              </span>
+            ) : null}
+          </div>
+        }
+      />
 
       <div
         className="phase-row__flow"
@@ -266,12 +271,11 @@ function PhasePanel({
             const stateKey = `${phase.name}:${stateName}`
             const expanded = expandedStates[stateKey] ?? false
             const processing = items.filter((entity) => entity.processing)
-            const collapsedPreview =
-              items.length === 0
-                ? null
-                : processing.length > 0
-                  ? `Running: ${processing.map((entity) => entity.id).join(', ')}`
-                  : items[0].id
+            const entityCount = stateCount(status.counts, phase.name, stateName)
+            const runningSummary =
+              processing.length > 0
+                ? `Running: ${processing.map((entity) => entity.id).join(', ')}`
+                : null
             const activeSource = isActiveTransitionState(
               status.execution,
               phase.name,
@@ -298,10 +302,6 @@ function PhasePanel({
                 <header className="state-card__header">
                   <div>
                     <div className="state-card__name">{stateName}</div>
-                    <div className="state-card__summary">
-                      {stateCount(status.counts, phase.name, stateName)} entities
-                      {!expanded && collapsedPreview ? ` · ${collapsedPreview}` : ''}
-                    </div>
                   </div>
 
                   <div className="state-card__actions">
@@ -338,9 +338,13 @@ function PhasePanel({
                     {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </span>
                   <span className="state-card__toggle-meta">
-                    {processing.length > 0
-                      ? `Running: ${processing.map((entity) => entity.id).join(', ')}`
-                      : 'No active entities'}
+                    {expanded
+                      ? items.length > 0
+                        ? 'Hide entities'
+                        : 'No entities'
+                      : items.length > 0
+                        ? `View ${entityCount} ${entityCount === 1 ? 'entity' : 'entities'}${runningSummary ? ` · ${runningSummary}` : ''}`
+                        : 'No entities'}
                   </span>
                 </button>
 
@@ -390,7 +394,7 @@ function PhasePanel({
           })}
         </div>
       </div>
-    </article>
+    </Surface>
   )
 }
 

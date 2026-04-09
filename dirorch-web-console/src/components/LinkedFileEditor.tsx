@@ -13,6 +13,9 @@ import {
 import type { ContentFormat, FileDetail } from '../api/types'
 import { tryParseJson } from '../lib/json'
 import { DocumentContentEditor } from './DocumentContentEditor'
+import { EmptyState } from './ui/EmptyState'
+import { SectionHeader } from './ui/SectionHeader'
+import { Surface } from './ui/Surface'
 
 interface LinkedFileEditorProps {
   path: string
@@ -125,27 +128,27 @@ export function LinkedFileEditor({ path, readOnly = false }: LinkedFileEditorPro
       : loadedFile.format !== draft.format || loadedFile.content !== draft.rawContent
 
   return (
-    <aside className="linked-file-panel">
-      <header className="linked-file-panel__header">
-        <div>
-          <div className="panel-eyebrow">Referenced file</div>
-          <div className="linked-file-panel__path">{path}</div>
-        </div>
-        <span
-          className={clsx(
-            'status-pill',
-            fileExists ? 'status-pill--success' : 'status-pill--neutral',
-          )}
-        >
-          {fileExists ? 'Existing' : 'Missing'}
-        </span>
-      </header>
+    <Surface as="aside" className="linked-file-panel" padding="none">
+      <SectionHeader
+        className="linked-file-panel__header"
+        eyebrow="Referenced file"
+        title={<div className="linked-file-panel__path">{path}</div>}
+        actions={
+          <span
+            className={clsx(
+              'status-pill',
+              fileExists ? 'status-pill--success' : 'status-pill--neutral',
+            )}
+          >
+            {fileExists ? 'Existing' : 'Missing'}
+          </span>
+        }
+      />
 
       {fileQuery.isLoading ? (
-        <div className="panel-placeholder">
-          <LoaderCircle className="spin" size={16} />
+        <EmptyState className="panel-placeholder" icon={<LoaderCircle className="spin" size={16} />}>
           Loading file
-        </div>
+        </EmptyState>
       ) : fileQuery.error instanceof ApiError && fileQuery.error.status !== 404 ? (
         <div className="inline-error">{formatError(fileQuery.error)}</div>
       ) : (
@@ -214,7 +217,7 @@ export function LinkedFileEditor({ path, readOnly = false }: LinkedFileEditorPro
           </div>
         </>
       )}
-    </aside>
+    </Surface>
   )
 }
 

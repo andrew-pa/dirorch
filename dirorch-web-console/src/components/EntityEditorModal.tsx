@@ -30,6 +30,8 @@ import type {
 import { extractPathReferences, tryParseJson } from '../lib/json'
 import { DocumentContentEditor } from './DocumentContentEditor'
 import { LinkedFileEditor } from './LinkedFileEditor'
+import { EmptyState } from './ui/EmptyState'
+import { SectionHeader } from './ui/SectionHeader'
 
 interface EntityEditorModalProps {
   initialPhase: string
@@ -323,45 +325,47 @@ export function EntityEditorModal({
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content entity-dialog">
-          <header className="dialog-header">
-            <div>
-              <div className="panel-eyebrow">{mode === 'edit' ? 'Entity' : 'New entity'}</div>
+        <Dialog.Content className="surface surface--padding-none surface--radius-xl dialog-content entity-dialog">
+          <SectionHeader
+            className="dialog-header"
+            eyebrow={mode === 'edit' ? 'Entity' : 'New entity'}
+            title={
               <Dialog.Title className="dialog-title">
                 {mode === 'edit' ? draft.id || entityId : 'Create entity'}
               </Dialog.Title>
-            </div>
-
-            <div className="dialog-header__actions">
-              {mode === 'edit' ? (
-                <span
-                  className={clsx(
-                    'status-pill',
-                    !isEditing
-                      ? 'status-pill--neutral'
+            }
+            actions={
+              <>
+                {mode === 'edit' ? (
+                  <span
+                    className={clsx(
+                      'status-pill',
+                      !isEditing
+                        ? 'status-pill--neutral'
+                        : lockState === 'ready'
+                        ? 'status-pill--success'
+                        : lockState === 'error'
+                          ? 'status-pill--danger'
+                          : 'status-pill--warning',
+                    )}
+                  >
+                    <Lock size={14} />
+                    {!isEditing
+                      ? 'View only'
                       : lockState === 'ready'
-                      ? 'status-pill--success'
+                      ? 'Locked'
                       : lockState === 'error'
-                        ? 'status-pill--danger'
-                        : 'status-pill--warning',
-                  )}
-                >
-                  <Lock size={14} />
-                  {!isEditing
-                    ? 'View only'
-                    : lockState === 'ready'
-                    ? 'Locked'
-                    : lockState === 'error'
-                      ? 'Lock failed'
-                      : 'Locking'}
-                </span>
-              ) : null}
+                        ? 'Lock failed'
+                        : 'Locking'}
+                  </span>
+                ) : null}
 
-              <Dialog.Close className="icon-button" aria-label="Close">
-                <X size={16} />
-              </Dialog.Close>
-            </div>
-          </header>
+                <Dialog.Close className="icon-button" aria-label="Close">
+                  <X size={16} />
+                </Dialog.Close>
+              </>
+            }
+          />
 
           <Dialog.Description className="visually-hidden">
             {mode === 'edit'
@@ -370,154 +374,164 @@ export function EntityEditorModal({
           </Dialog.Description>
 
           {mode === 'edit' && detailQuery.isLoading ? (
-            <div className="dialog-loading">
-              <LoaderCircle className="spin" size={16} />
-              Loading entity
+            <div className="dialog-body">
+              <EmptyState
+                className="dialog-loading"
+                icon={<LoaderCircle className="spin" size={16} />}
+              >
+                Loading entity
+              </EmptyState>
             </div>
           ) : mode === 'edit' && detailQuery.error ? (
-            <div className="inline-error">{formatError(detailQuery.error)}</div>
+            <div className="dialog-body">
+              <div className="inline-error">{formatError(detailQuery.error)}</div>
+            </div>
           ) : (
             <>
-              <div className="entity-dialog__layout">
-                <section className="entity-form">
-                  <div className="entity-form__grid">
-                    <label className="field">
-                      <span className="field__label">Entity</span>
-                      <input
-                        className="field__input field__input--mono"
-                        disabled={mode === 'edit'}
-                        value={draft.id}
-                        onChange={(event) => {
-                          setDraft((current) => ({
-                            ...current,
-                            id: event.target.value,
-                          }))
-                        }}
-                      />
-                    </label>
+              <div className="dialog-body">
+                <div className="entity-dialog__layout">
+                  <section className="entity-form">
+                    <div className="entity-form__grid">
+                      <label className="field">
+                        <span className="field__label">Entity</span>
+                        <input
+                          className="field__input field__input--mono"
+                          disabled={mode === 'edit'}
+                          value={draft.id}
+                          onChange={(event) => {
+                            setDraft((current) => ({
+                              ...current,
+                              id: event.target.value,
+                            }))
+                          }}
+                        />
+                      </label>
 
-                    <label className="field">
-                      <span className="field__label">Phase</span>
-                      <select
-                        className="field__input"
-                        disabled={readOnly}
-                        value={draft.phase}
-                        onChange={(event) => {
-                          const nextPhase = event.target.value
-                          const nextPhaseConfig = workflow.phases.find(
-                            (phase) => phase.name === nextPhase,
-                          )
-                          const nextStates = nextPhaseConfig
-                            ? [...nextPhaseConfig.states, ...nextPhaseConfig.reserved_states]
-                            : []
+                      <label className="field">
+                        <span className="field__label">Phase</span>
+                        <select
+                          className="field__input"
+                          disabled={readOnly}
+                          value={draft.phase}
+                          onChange={(event) => {
+                            const nextPhase = event.target.value
+                            const nextPhaseConfig = workflow.phases.find(
+                              (phase) => phase.name === nextPhase,
+                            )
+                            const nextStates = nextPhaseConfig
+                              ? [...nextPhaseConfig.states, ...nextPhaseConfig.reserved_states]
+                              : []
 
-                          setDraft((current) => ({
-                            ...current,
-                            phase: nextPhase,
-                            state:
-                              nextStates.includes(current.state) && current.state
-                                ? current.state
-                                : (nextStates[0] ?? ''),
-                          }))
-                        }}
-                      >
-                        {workflow.phases.map((phase) => (
-                          <option key={phase.name} value={phase.name}>
-                            {phase.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                            setDraft((current) => ({
+                              ...current,
+                              phase: nextPhase,
+                              state:
+                                nextStates.includes(current.state) && current.state
+                                  ? current.state
+                                  : (nextStates[0] ?? ''),
+                            }))
+                          }}
+                        >
+                          {workflow.phases.map((phase) => (
+                            <option key={phase.name} value={phase.name}>
+                              {phase.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field">
-                      <span className="field__label">State</span>
-                      <select
-                        className="field__input"
-                        disabled={readOnly}
-                        value={draft.state}
-                        onChange={(event) => {
-                          const nextState = event.target.value
-                          setDraft((current) => ({ ...current, state: nextState }))
-                        }}
-                      >
-                        {stateOptions.map((stateName) => (
-                          <option key={stateName} value={stateName}>
-                            {stateName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <DocumentContentEditor
-                    format={draft.format}
-                    editorMode={draft.editorMode}
-                    readOnly={readOnly}
-                    rawContent={draft.rawContent}
-                    onFormatChange={(nextFormat) => {
-                      setDraft((current) => ({
-                        ...current,
-                        format: nextFormat,
-                        editorMode: nextFormat === 'json' ? current.editorMode : 'raw',
-                        rawContent:
-                          nextFormat === 'json' && current.rawContent.trim().length === 0
-                            ? '{}'
-                            : current.rawContent,
-                      }))
-                    }}
-                    onEditorModeChange={(nextMode) => {
-                      setDraft((current) => ({ ...current, editorMode: nextMode }))
-                    }}
-                    onRawContentChange={(rawContent) => {
-                      setDraft((current) => ({ ...current, rawContent }))
-                    }}
-                  />
-
-                  {pathReferences.length > 0 ? (
-                    <div className="linked-file-list">
-                      <div className="linked-file-list__header">
-                        <span className="panel-eyebrow">Referenced files</span>
-                        <span className="status-pill status-pill--neutral">
-                          <FileJson2 size={14} />
-                          {pathReferences.length}
-                        </span>
-                      </div>
-                      <div className="linked-file-list__items">
-                        {pathReferences.map((reference) => (
-                          <button
-                            key={`${reference.location}:${reference.value}`}
-                            className={clsx(
-                              'linked-file-list__item',
-                              selectedFilePath === reference.value && 'is-active',
-                            )}
-                            type="button"
-                            onClick={() => setSelectedFilePath(reference.value)}
-                          >
-                            <div>
-                              <div className="linked-file-list__key">{reference.location}</div>
-                              <div className="linked-file-list__path">{reference.value}</div>
-                            </div>
-                            <ChevronRight size={16} />
-                          </button>
-                        ))}
-                      </div>
+                      <label className="field">
+                        <span className="field__label">State</span>
+                        <select
+                          className="field__input"
+                          disabled={readOnly}
+                          value={draft.state}
+                          onChange={(event) => {
+                            const nextState = event.target.value
+                            setDraft((current) => ({ ...current, state: nextState }))
+                          }}
+                        >
+                          {stateOptions.map((stateName) => (
+                            <option key={stateName} value={stateName}>
+                              {stateName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
-                  ) : null}
-                </section>
 
-                <section className="entity-dialog__side">
-                  {selectedFilePath ? (
-                    <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
-                  ) : (
-                    <div className="panel-placeholder">
-                      <Plus size={16} />
-                      No linked file selected
-                    </div>
-                  )}
-                </section>
+                    <DocumentContentEditor
+                      format={draft.format}
+                      editorMode={draft.editorMode}
+                      readOnly={readOnly}
+                      rawContent={draft.rawContent}
+                      onFormatChange={(nextFormat) => {
+                        setDraft((current) => ({
+                          ...current,
+                          format: nextFormat,
+                          editorMode: nextFormat === 'json' ? current.editorMode : 'raw',
+                          rawContent:
+                            nextFormat === 'json' && current.rawContent.trim().length === 0
+                              ? '{}'
+                              : current.rawContent,
+                        }))
+                      }}
+                      onEditorModeChange={(nextMode) => {
+                        setDraft((current) => ({ ...current, editorMode: nextMode }))
+                      }}
+                      onRawContentChange={(rawContent) => {
+                        setDraft((current) => ({ ...current, rawContent }))
+                      }}
+                    />
+
+                    {pathReferences.length > 0 ? (
+                      <div className="linked-file-list">
+                        <SectionHeader
+                          className="linked-file-list__header"
+                          eyebrow="Referenced files"
+                          actions={
+                            <span className="status-pill status-pill--neutral">
+                              <FileJson2 size={14} />
+                              {pathReferences.length}
+                            </span>
+                          }
+                        />
+                        <div className="linked-file-list__items">
+                          {pathReferences.map((reference) => (
+                            <button
+                              key={`${reference.location}:${reference.value}`}
+                              className={clsx(
+                                'linked-file-list__item',
+                                selectedFilePath === reference.value && 'is-active',
+                              )}
+                              type="button"
+                              onClick={() => setSelectedFilePath(reference.value)}
+                            >
+                              <div>
+                                <div className="linked-file-list__key">{reference.location}</div>
+                                <div className="linked-file-list__path">{reference.value}</div>
+                              </div>
+                              <ChevronRight size={16} />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="entity-dialog__side">
+                    {selectedFilePath ? (
+                      <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
+                    ) : (
+                      <EmptyState className="panel-placeholder" icon={<Plus size={16} />}>
+                        No linked file selected
+                      </EmptyState>
+                    )}
+                  </section>
+                </div>
+
+                {saveError ? <div className="inline-error">{saveError}</div> : null}
               </div>
-
-              {saveError ? <div className="inline-error">{saveError}</div> : null}
 
               <footer className="dialog-footer">
                 <button className="button button--ghost" type="button" onClick={onClose}>

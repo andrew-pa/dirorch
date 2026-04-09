@@ -1,5 +1,7 @@
 import { Suspense, lazy } from 'react'
 
+import { EmptyState } from './ui/EmptyState'
+
 const MonacoEditor = lazy(() => import('@monaco-editor/react'))
 
 interface CodeEditorProps {
@@ -19,7 +21,7 @@ export function CodeEditor({
 }: CodeEditorProps) {
   return (
     <div className="editor-surface editor-surface--code">
-      <Suspense fallback={<div className="panel-placeholder">Loading editor</div>}>
+      <Suspense fallback={<EmptyState className="panel-placeholder">Loading editor</EmptyState>}>
         <MonacoEditor
           height={height}
           language={language}
