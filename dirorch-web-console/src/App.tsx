@@ -1,8 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 
-import { ApiError, getEntities, getWorkflow, getWorkflowStatus, queryKeys } from './api/dirorch'
+import {
+  ApiError,
+  getEntities,
+  getWorkflow,
+  getWorkflowStatus,
+  queryKeys,
+  updateEntity,
+} from './api/dirorch'
 import type { EntitySummary } from './api/types'
 import { EntityEditorModal } from './components/EntityEditorModal'
 import { WorkflowOverview } from './components/WorkflowOverview'
@@ -22,7 +29,9 @@ type ModalState =
   | null
 
 export default function App() {
+  const queryClient = useQueryClient()
   const [modalState, setModalState] = useState<ModalState>(null)
+  const [moveError, setMoveError] = useState<string | null>(null)
 
   const workflowQuery = useQuery({
     queryKey: queryKeys.workflow,
@@ -42,12 +51,47 @@ export default function App() {
     refetchInterval: 2_000,
   })
 
+  const moveEntityMutation = useMutation({
+    mutationFn: async ({
+      entity,
+      phase,
+      state,
+    }: {
+      entity: EntitySummary
+      phase: string
+      state: string
+    }) => {
+      await updateEntity(entity.id, { phase, state })
+    },
+    onSuccess: async (_, { entity }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.entity(entity.id) }),
+      ])
+    },
+  })
+
   async function handleRefresh() {
     await Promise.all([
       workflowQuery.refetch(),
       statusQuery.refetch(),
       entitiesQuery.refetch(),
     ])
+  }
+
+  async function handleMoveEntity(entity: EntitySummary, phase: string, state: string) {
+    if (entity.processing || entity.locked || (entity.phase === phase && entity.state === state)) {
+      return
+    }
+
+    setMoveError(null)
+
+    try {
+      await moveEntityMutation.mutateAsync({ entity, phase, state })
+    } catch (error) {
+      setMoveError(formatError(error))
+    }
   }
 
   const loading =
@@ -77,10 +121,18 @@ export default function App() {
 
   return (
     <>
+      {moveError ? (
+        <main className="app-notice">
+          <div className="inline-error">{moveError}</div>
+        </main>
+      ) : null}
+
       <WorkflowOverview
         entities={entitiesQuery.data.entities}
         isRefreshing={statusQuery.isRefetching || entitiesQuery.isRefetching}
+        movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
         onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
+        onMoveEntity={(entity, phase, state) => void handleMoveEntity(entity, phase, state)}
         onRefresh={() => void handleRefresh()}
         onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}
         status={statusQuery.data}

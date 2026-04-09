@@ -40,7 +40,9 @@ import { Surface } from './ui/Surface'
 interface WorkflowOverviewProps {
   entities: EntitySummary[]
   isRefreshing: boolean
+  movingEntityId: string | null
   onCreateEntity: (phase: string, state: string) => void
+  onMoveEntity: (entity: EntitySummary, phase: string, state: string) => void
   onRefresh: () => void
   onSelectEntity: (entity: EntitySummary) => void
   status: WorkflowStatusPayload
@@ -50,13 +52,17 @@ interface WorkflowOverviewProps {
 export function WorkflowOverview({
   entities,
   isRefreshing,
+  movingEntityId,
   onCreateEntity,
+  onMoveEntity,
   onRefresh,
   onSelectEntity,
   status,
   workflow,
 }: WorkflowOverviewProps) {
   const [expandedStates, setExpandedStates] = useState<Record<string, boolean>>({})
+  const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null)
+  const [dropTargetKey, setDropTargetKey] = useState<string | null>(null)
   const [runtimeCollapsed, setRuntimeCollapsed] = useState(false)
   const cursorEntity = findCursorEntity(status.runtime_snapshot, entities)
   const activeIds = runnerEntityIds(status.execution)
@@ -167,11 +173,17 @@ export function WorkflowOverview({
             entities={entities}
             expandedStates={expandedStates}
             key={phase.name}
+            movingEntityId={movingEntityId}
             onCreateEntity={onCreateEntity}
+            onMoveEntity={onMoveEntity}
             onSelectEntity={onSelectEntity}
             phase={phase}
             setExpandedStates={setExpandedStates}
             status={status}
+            draggedEntityId={draggedEntityId}
+            dropTargetKey={dropTargetKey}
+            setDraggedEntityId={setDraggedEntityId}
+            setDropTargetKey={setDropTargetKey}
           />
         ))}
       </section>
@@ -181,22 +193,34 @@ export function WorkflowOverview({
 
 interface PhasePanelProps {
   cursorEntity: EntitySummary | null
+  draggedEntityId: string | null
+  dropTargetKey: string | null
   entities: EntitySummary[]
   expandedStates: Record<string, boolean>
+  movingEntityId: string | null
   onCreateEntity: (phase: string, state: string) => void
+  onMoveEntity: (entity: EntitySummary, phase: string, state: string) => void
   onSelectEntity: (entity: EntitySummary) => void
   phase: PhaseDefinition
+  setDraggedEntityId: Dispatch<SetStateAction<string | null>>
+  setDropTargetKey: Dispatch<SetStateAction<string | null>>
   setExpandedStates: Dispatch<SetStateAction<Record<string, boolean>>>
   status: WorkflowStatusPayload
 }
 
 function PhasePanel({
   cursorEntity,
+  draggedEntityId,
+  dropTargetKey,
   entities,
   expandedStates,
+  movingEntityId,
   onCreateEntity,
+  onMoveEntity,
   onSelectEntity,
   phase,
+  setDraggedEntityId,
+  setDropTargetKey,
   setExpandedStates,
   status,
 }: PhasePanelProps) {
@@ -288,16 +312,64 @@ function PhasePanel({
               stateName,
               'destination',
             )
+            const dropTargetActive = dropTargetKey === stateKey
+            const draggedEntity = draggedEntityId
+              ? entities.find((entity) => entity.id === draggedEntityId) ?? null
+              : null
+            const canDropDraggedEntity = Boolean(
+              draggedEntity &&
+                !draggedEntity.processing &&
+                !movingEntityId &&
+                (draggedEntity.phase !== phase.name || draggedEntity.state !== stateName),
+            )
 
             return (
               <section
+                data-state-drop-target={stateKey}
                 className={clsx(
                   'state-card',
                   stateName.startsWith('_') && 'state-card--reserved',
                   activeSource && 'state-card--source',
                   activeDestination && 'state-card--destination',
+                  dropTargetActive && 'state-card--drop-target',
                 )}
                 key={stateKey}
+                onDragEnter={(event) => {
+                  if (!canDropDraggedEntity) {
+                    return
+                  }
+
+                  event.preventDefault()
+                  setDropTargetKey(stateKey)
+                }}
+                onDragOver={(event) => {
+                  if (!canDropDraggedEntity) {
+                    return
+                  }
+
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  setDropTargetKey(stateKey)
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    return
+                  }
+
+                  if (dropTargetKey === stateKey) {
+                    setDropTargetKey(null)
+                  }
+                }}
+                onDrop={(event) => {
+                  if (!draggedEntity || !canDropDraggedEntity) {
+                    return
+                  }
+
+                  event.preventDefault()
+                  setDropTargetKey(null)
+                  setDraggedEntityId(null)
+                  onMoveEntity(draggedEntity, phase.name, stateName)
+                }}
               >
                 <header className="state-card__header">
                   <div>
@@ -351,11 +423,34 @@ function PhasePanel({
                 {expanded ? (
                   <div className="entity-list">
                     {items.length > 0 ? (
-                      items.map((entity) => (
+                      items.map((entity) => {
+                        const canMoveEntity = !entity.processing && !entity.locked
+
+                        return (
                         <button
-                          className="entity-list__item"
+                          data-entity-drag-source={entity.id}
+                          className={clsx(
+                            'entity-list__item',
+                            canMoveEntity && 'entity-list__item--draggable',
+                            movingEntityId === entity.id && 'entity-list__item--moving',
+                          )}
+                          draggable={canMoveEntity && movingEntityId !== entity.id}
                           key={entity.id}
                           type="button"
+                          onDragEnd={() => {
+                            setDraggedEntityId(null)
+                            setDropTargetKey(null)
+                          }}
+                          onDragStart={(event) => {
+                            if (!canMoveEntity || movingEntityId === entity.id) {
+                              event.preventDefault()
+                              return
+                            }
+
+                            event.dataTransfer.effectAllowed = 'move'
+                            event.dataTransfer.setData('text/plain', entity.id)
+                            setDraggedEntityId(entity.id)
+                          }}
                           onClick={() => onSelectEntity(entity)}
                         >
                           <div className="entity-list__title">
@@ -365,6 +460,10 @@ function PhasePanel({
                                 <span className="status-pill status-pill--success">
                                   <Play size={14} />
                                   Running
+                                </span>
+                              ) : canMoveEntity ? (
+                                <span className="status-pill status-pill--neutral">
+                                  Move
                                 </span>
                               ) : null}
                               {entity.locked ? (
@@ -383,7 +482,8 @@ function PhasePanel({
                             </div>
                           </div>
                         </button>
-                      ))
+                        )
+                      })
                     ) : (
                       <div className="entity-list__empty">No entities</div>
                     )}
