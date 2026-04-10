@@ -25,6 +25,7 @@ The implementation is organized into focused modules under `dirorch/`:
   - one directory per phase
   - one child directory per state
   - one file per entity
+- Persists per-entity append-only transcripts under `${root}/entity_logs/`
 - Runs transitions until each phase reaches fixpoint (no more applicable moves)
 - Supports transition hooks, completion hooks, retries, jump phases, resume-from-state, and grouped concurrency
 - Can stay in `--watch` mode and rerun when entities are added or externally moved
@@ -148,6 +149,8 @@ Available endpoints:
 - `GET /status/workflow`: persisted runtime snapshot, entity counts, locks, and current execution activity
 - `GET /status/entities`: entity list with phase/state, lock state, and processing flag
 - `GET /entity/{id}`: entity metadata plus file contents
+- `GET /entity/{id}/log`: current rendered entity transcript with `offset` and `next_offset`
+- `GET /entity/{id}/log/events?from_offset=<n>`: SSE stream with `snapshot`, `append`, and `status` events
 - `POST /entity`: create an entity
 - `PUT /entity/{id}`: update entity contents and/or move it to another phase/state
 - `PUT /entity/{id}/lock`: lock or unlock an entity
@@ -158,7 +161,21 @@ Locking behavior:
 
 - Locked entities are excluded from workflow transitions until they are unlocked.
 - Locks are persisted separately from runtime state in `${root}/.dirorch_locks.json`.
-- The generic `/file` API cannot modify Dirorch-managed entity directories, the runtime state file, or the lock file.
+- The generic `/file` API cannot modify Dirorch-managed entity directories, `${root}/entity_logs/`, the runtime state file, or the lock file.
+
+## Per-Entity Logs
+
+Entity-scoped transition processing writes transcripts to `${root}/entity_logs/<entity>.log`.
+
+The transcript includes:
+
+- transition start, move, failure, and jump events
+- command start, finish, and retry events
+- raw `stdout` and `stderr` chunks exactly as observed, including ANSI/control sequences
+- selector outcomes for dynamic `to` and `jump` hooks
+- API-driven entity audit events such as create, update, manual move, lock/unlock, and delete
+
+The transcript does not currently include global `init` hooks or completion hooks because those are not naturally scoped to one entity.
 
 ## Workflow YAML Reference
 

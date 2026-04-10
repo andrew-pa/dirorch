@@ -1612,3 +1612,104 @@ phases:
     asyncio.run(run(options))
 
     assert (root / "tasks" / "done" / "named.txt").exists()
+
+
+def test_entity_logs_capture_command_output_and_move_events(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          python -c "import sys; sys.stdout.write('stdout-line\\n'); sys.stdout.flush();
+          sys.stderr.write('\\x1b[31mstderr-line\\x1b[0m\\n'); sys.stderr.flush()"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "logged.txt", "payload")
+
+    _run_workflow(workflow, tmp_path)
+
+    log_path = tmp_path / "entity_logs" / "logged.txt.log"
+    log_text = log_path.read_text(encoding="utf-8")
+
+    assert "transition started tasks:new -> done" in log_text
+    assert 'command started attempt=1 cmd="' in log_text
+    assert "stdout-line\n" in log_text
+    assert "\x1b[31mstderr-line\x1b[0m\n" in log_text
+    assert "command finished exit=0" in log_text
+    assert "moved to tasks/done" in log_text
+
+
+def test_entity_logs_show_retries_and_final_success(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    retry_flag = tmp_path / "retry.flag"
+    _write(
+        workflow,
+        f"""
+retries: 1
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          if [ ! -f "{retry_flag}" ]; then
+            printf 'first-fail\\n' >&2;
+            touch "{retry_flag}";
+            exit 1;
+          fi;
+          printf 'second-pass\\n'
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "retry.txt", "payload")
+
+    _run_workflow(workflow, tmp_path)
+
+    log_text = (tmp_path / "entity_logs" / "retry.txt.log").read_text(encoding="utf-8")
+
+    assert "first-fail\n" in log_text
+    assert 'retrying command next_attempt=2 reason="exit=1"' in log_text
+    assert "second-pass\n" in log_text
+    assert "command finished exit=0" in log_text
+    assert "moved to tasks/done" in log_text
+
+
+def test_entity_logs_capture_implicit_transition_and_selector_resolution(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, review, done]
+    transitions:
+      - from: new
+        to:
+          cmd: >
+            printf 'selector-output\\n';
+            printf 'review\\n' >&3
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "selector.txt", "payload")
+
+    _run_workflow(workflow, tmp_path)
+
+    log_text = (tmp_path / "entity_logs" / "selector.txt.log").read_text(encoding="utf-8")
+
+    assert "implicit transition; no command configured" in log_text
+    assert 'selector started kind=destination attempt=1 cmd="' in log_text
+    assert "selector-output\n" in log_text
+    assert "selector resolved destination=review" in log_text
+    assert "moved to tasks/review" in log_text

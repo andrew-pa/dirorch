@@ -12,10 +12,11 @@ from .constants import (
     PHASE_MODE_PARALLEL,
     PHASE_MODE_TRANSITIONS,
 )
+from .entity_logging import EntityLogEvent, EntityLogEmitter, NullEntityLogEmitter, utc_now
 from .entities import EntityStore
 from .execution import NullExecutionObserver
 from .errors import WorkflowError
-from .hooks import HookRunner
+from .hooks import HookExecutionContext, HookRunner
 from .models import (
     Group,
     HookConfig,
@@ -52,6 +53,7 @@ class PhaseProcessorDeps:
     clear_entity_cursor: EntityCursorClearer
     execution_observer: NullExecutionObserver
     is_entity_locked: EntityLockChecker
+    entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
 
 class PhaseProcessor:
@@ -68,6 +70,7 @@ class PhaseProcessor:
         self._clear_entity_cursor = deps.clear_entity_cursor
         self._execution_observer = deps.execution_observer
         self._is_entity_locked = deps.is_entity_locked
+        self._entity_log_emitter = deps.entity_log_emitter
         self.config = config
 
     async def _run(self) -> int:
@@ -113,13 +116,26 @@ class PhaseProcessor:
 
         context = self._transition_context(transition, entity)
         extra_env = {"INPUT_ENTITY": str(entity.resolve())}
+        await self._emit_entity_event(
+            entity.name,
+            kind="transition.started",
+            source_state=transition.source,
+            destination_state=self._configured_destination_state(transition),
+            metadata={
+                "configured_destination": transition.destination.display_name,
+                "configured_jump": None
+                if transition.jump_target is None
+                else transition.jump_target.display_name,
+            },
+        )
 
-        if not await self._run_transition_side_effect(transition, extra_env, context):
+        if not await self._run_transition_side_effect(transition, entity, extra_env, context):
             return await self._handle_transition_failure(transition, entity)
 
         try:
             destination_state = await self._resolve_transition_destination(
                 transition,
+                entity,
                 extra_env,
                 context,
             )
@@ -140,6 +156,7 @@ class PhaseProcessor:
         try:
             jump_phase = await self._resolve_transition_jump(
                 transition,
+                entity,
                 extra_env,
                 context,
             )
@@ -179,32 +196,49 @@ class PhaseProcessor:
     async def _run_transition_side_effect(
         self,
         transition: TransitionConfig,
+        entity: Path,
         extra_env: dict[str, str],
         context: str,
     ) -> bool:
         if transition.cmd is None:
+            await self._emit_entity_event(
+                entity.name,
+                kind="transition.implicit",
+                source_state=transition.source,
+                destination_state=self._configured_destination_state(transition),
+            )
             return True
         return await self._hook_runner.run(
             HookConfig(cmd=transition.cmd, stdin=transition.stdin),
             extra_env,
             context,
+            execution_context=self._hook_execution_context(
+                entity,
+                transition,
+                command_role="transition_side_effect",
+            ),
         )
 
     async def _resolve_transition_destination(
         self,
         transition: TransitionConfig,
+        entity: Path,
         extra_env: dict[str, str],
         context: str,
     ) -> str | None:
         return await self._resolve_named_target(
             transition.destination,
+            entity,
+            transition,
             extra_env,
             f"{context} destination selector",
+            selector_kind="destination",
         )
 
     async def _resolve_transition_jump(
         self,
         transition: TransitionConfig,
+        entity: Path,
         extra_env: dict[str, str],
         context: str,
     ) -> str | None:
@@ -212,15 +246,22 @@ class PhaseProcessor:
             return None
         return await self._resolve_named_target(
             transition.jump_target,
+            entity,
+            transition,
             extra_env,
             f"{context} jump selector",
+            selector_kind="jump",
         )
 
     async def _resolve_named_target(
         self,
         target: NamedTargetConfig,
+        entity: Path,
+        transition: TransitionConfig,
         extra_env: dict[str, str],
         context: str,
+        *,
+        selector_kind: str,
     ) -> str | None:
         if target.constant is not None:
             return target.constant
@@ -231,10 +272,39 @@ class PhaseProcessor:
             extra_env,
             context,
             capture_selector_output=True,
+            execution_context=self._hook_execution_context(
+                entity,
+                transition,
+                command_role=(
+                    "transition_selector_destination"
+                    if selector_kind == "destination"
+                    else "transition_selector_jump"
+                ),
+            ),
         )
         if not result.succeeded:
             raise WorkflowError(f"{context} failed after retries")
-        return result.selector_output or None
+        resolved = result.selector_output or None
+        if resolved is None:
+            await self._emit_entity_event(
+                entity.name,
+                kind="selector.empty",
+                source_state=transition.source,
+                destination_state=self._configured_destination_state(transition),
+                metadata={"selector_kind": selector_kind},
+            )
+            return None
+        await self._emit_entity_event(
+            entity.name,
+            kind="selector.resolved",
+            source_state=transition.source,
+            destination_state=self._configured_destination_state(transition),
+            metadata={
+                "selector_kind": selector_kind,
+                "selected": resolved,
+            },
+        )
+        return resolved
 
     async def _handle_transition_failure(
         self,
@@ -244,6 +314,19 @@ class PhaseProcessor:
         reason: str | None = None,
     ) -> TransitionResult:
         await self._entities.move_to_state(self.config.name, FAILED_STATE, entity)
+        await self._emit_entity_event(
+            entity.name,
+            kind="transition.failed",
+            source_state=transition.source,
+            destination_state=FAILED_STATE,
+            metadata={} if reason is None else {"reason": reason},
+        )
+        await self._emit_entity_event(
+            entity.name,
+            kind="transition.moved",
+            source_state=transition.source,
+            destination_state=FAILED_STATE,
+        )
         if reason is None:
             self._logger.error(
                 "Transition failed for '%s'; moved to %s/%s",
@@ -274,6 +357,20 @@ class PhaseProcessor:
         jump_phase: str | None,
     ) -> TransitionResult:
         await self._entities.move_to_state(self.config.name, destination_state, entity)
+        await self._emit_entity_event(
+            entity.name,
+            kind="transition.moved",
+            source_state=transition.source,
+            destination_state=destination_state,
+        )
+        if jump_phase is not None:
+            await self._emit_entity_event(
+                entity.name,
+                kind="transition.jump",
+                source_state=transition.source,
+                destination_state=destination_state,
+                metadata={"target_phase": jump_phase},
+            )
         self._logger.info(
             "Moved entity '%s' to %s/%s",
             entity.name,
@@ -292,6 +389,43 @@ class PhaseProcessor:
         transition: TransitionConfig,
     ) -> str | None:
         return transition.destination.constant
+
+    def _hook_execution_context(
+        self,
+        entity: Path,
+        transition: TransitionConfig,
+        *,
+        command_role: str,
+    ) -> HookExecutionContext:
+        return HookExecutionContext(
+            entity_id=entity.name,
+            phase_name=self.config.name,
+            source_state=transition.source,
+            destination_state=self._configured_destination_state(transition),
+            command_role=command_role,
+            context_label=self._transition_context(transition, entity),
+        )
+
+    async def _emit_entity_event(
+        self,
+        entity_id: str,
+        *,
+        kind: str,
+        source_state: str | None,
+        destination_state: str | None,
+        metadata: dict[str, str | int | bool | None] | None = None,
+    ) -> None:
+        await self._entity_log_emitter.emit(
+            EntityLogEvent(
+                entity_id=entity_id,
+                timestamp=utc_now(),
+                kind=kind,
+                phase=self.config.name,
+                source_state=source_state,
+                destination_state=destination_state,
+                metadata={} if metadata is None else metadata,
+            )
+        )
 
 
 class AllAtOncePhaseProcessor(PhaseProcessor):
@@ -512,6 +646,7 @@ class WorkflowEngine:
         logger: logging.Logger
         execution_observer: NullExecutionObserver | None = None
         is_entity_locked: EntityLockChecker | None = None
+        entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
     def __init__(
         self,
@@ -539,6 +674,7 @@ class WorkflowEngine:
             clear_entity_cursor=self._clear_entity_cursor,
             execution_observer=execution_observer,
             is_entity_locked=is_entity_locked,
+            entity_log_emitter=deps.entity_log_emitter,
         )
         self._execution_observer = execution_observer
 

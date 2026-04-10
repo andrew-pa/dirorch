@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path, PurePosixPath
 
+from .constants import ENTITY_LOGS_DIR_NAME
 from .errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from .models import WorkflowConfig
 
@@ -19,6 +20,7 @@ class FileStore:
     ) -> None:
         self._root = root.resolve()
         self._reserved_top_level = {phase.name for phase in config.phases}
+        self._reserved_top_level.add(ENTITY_LOGS_DIR_NAME)
         self._reserved_files = {state_file_name, locks_file_name}
 
     def read(self, relative_path: str) -> tuple[Path, str]:

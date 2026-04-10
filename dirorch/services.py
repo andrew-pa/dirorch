@@ -7,6 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from .entities import EntityStore
+from .entity_logging import (
+    EntityLogBroadcaster,
+    EntityLogEmitter,
+    EntityLogEvent,
+    EntityTranscriptStore,
+    RenderedLogChunk,
+    NullEntityLogEmitter,
+    utc_now,
+)
 from .execution import ExecutionStatusTracker
 from .files import FileStore
 from .locks import EntityLockStore
@@ -81,11 +90,13 @@ class EntityAdminService:
         locks: EntityLockStore,
         tracker: ExecutionStatusTracker,
         coordinator: MutationCoordinator,
+        entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter(),
     ) -> None:
         self._entities = entities
         self._locks = locks
         self._tracker = tracker
         self._coordinator = coordinator
+        self._entity_log_emitter = entity_log_emitter
 
     def list_entities(self) -> list[dict[str, Any]]:
         return [self._serialize_entity(path) for path in self._entities.list_all_entities()]
@@ -114,6 +125,14 @@ class EntityAdminService:
             if self._entities.locate_entities(entity_id):
                 raise ConflictError(f"Entity '{entity_id}' already exists")
             entity = self._entities.create(phase_name, state_name, entity_id, content)
+        await self._emit_entity_event(
+            entity_id,
+            "entity.created",
+            metadata={
+                "phase": phase_name,
+                "state": state_name,
+            },
+        )
         return self.get_entity(entity.name)
 
     async def update_entity(
@@ -142,13 +161,35 @@ class EntityAdminService:
         if content is not None:
             _validate_format_content(format_name or "text", content)
 
+        changed_fields: list[str] = []
         async with self._coordinator.mutate():
             current = self._require_unique_entity(entity_id)
+            current_phase, current_state = self._entities.phase_state_for(current)
             if content is not None:
                 current = self._entities.update_contents(current, content)
-            current_phase, current_state = self._entities.phase_state_for(current)
             if (current_phase, current_state) != (target_phase, target_state):
                 await self._entities.move_to_state(target_phase, target_state, current)
+            if content is not None:
+                changed_fields.append("content")
+                if format_name is not None:
+                    changed_fields.append("format")
+        if changed_fields:
+            await self._emit_entity_event(
+                entity_id,
+                "entity.updated",
+                metadata={"changed": ",".join(changed_fields)},
+            )
+        if (current_phase, current_state) != (target_phase, target_state):
+            await self._emit_entity_event(
+                entity_id,
+                "entity.moved",
+                metadata={
+                    "from_phase": current_phase,
+                    "from_state": current_state,
+                    "to_phase": target_phase,
+                    "to_state": target_state,
+                },
+            )
         return self.get_entity(entity_id)
 
     async def set_locked(self, entity_id: str, locked: bool) -> dict[str, Any]:
@@ -157,6 +198,10 @@ class EntityAdminService:
             raise ConflictError(f"Entity '{entity_id}' is currently being processed")
         async with self._coordinator.mutate():
             self._locks.set_locked(entity_id, locked)
+        await self._emit_entity_event(
+            entity_id,
+            "entity.locked" if locked else "entity.unlocked",
+        )
         return self.get_entity(entity_id)
 
     async def delete_entity(self, entity_id: str) -> None:
@@ -165,6 +210,7 @@ class EntityAdminService:
             raise ConflictError(f"Entity '{entity_id}' is currently being processed")
         async with self._coordinator.mutate():
             current = self._require_unique_entity(entity_id)
+            await self._emit_entity_event(entity_id, "entity.deleted")
             self._entities.delete(current)
             self._locks.clear(entity_id)
 
@@ -200,6 +246,22 @@ class EntityAdminService:
         if not self._entities.is_valid_state(phase_name, state_name):
             raise ValidationError(f"Unknown phase/state '{phase_name}/{state_name}'")
         _validate_format_content(format_name, content)
+
+    async def _emit_entity_event(
+        self,
+        entity_id: str,
+        kind: str,
+        *,
+        metadata: dict[str, str | int | bool | None] | None = None,
+    ) -> None:
+        await self._entity_log_emitter.emit(
+            EntityLogEvent(
+                entity_id=entity_id,
+                timestamp=utc_now(),
+                kind=kind,
+                metadata={} if metadata is None else metadata,
+            )
+        )
 
 
 class FileAdminService:
@@ -307,6 +369,62 @@ class WorkflowStatusService:
 
     def entity_status(self) -> dict[str, Any]:
         return {"entities": self._entities.list_entities()}
+
+
+class EntityLogService:
+    def __init__(
+        self,
+        entities: EntityStore,
+        tracker: ExecutionStatusTracker,
+        store: EntityTranscriptStore,
+        broadcaster: EntityLogBroadcaster,
+    ) -> None:
+        self._entities = entities
+        self._tracker = tracker
+        self._store = store
+        self._broadcaster = broadcaster
+
+    async def get_log(
+        self,
+        entity_id: str,
+        offset: int = 0,
+        limit_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        await self._ensure_entity_or_log_exists(entity_id)
+        result = await self._store.read(entity_id, offset=offset, limit_bytes=limit_bytes)
+        return {
+            "entity_id": entity_id,
+            "text": result.text,
+            "offset": result.offset,
+            "next_offset": result.next_offset,
+            "exists": result.exists,
+            "processing": self._tracker.is_processing(entity_id),
+        }
+
+    async def log_exists(self, entity_id: str) -> bool:
+        await self._ensure_entity_or_log_exists(entity_id)
+        return await self._store.exists(entity_id)
+
+    async def subscribe(self, entity_id: str) -> asyncio.Queue[RenderedLogChunk]:
+        await self._ensure_entity_or_log_exists(entity_id)
+        return await self._broadcaster.subscribe(entity_id)
+
+    async def unsubscribe(
+        self,
+        entity_id: str,
+        queue: asyncio.Queue[RenderedLogChunk],
+    ) -> None:
+        await self._broadcaster.unsubscribe(entity_id, queue)
+
+    def is_processing(self, entity_id: str) -> bool:
+        return self._tracker.is_processing(entity_id)
+
+    async def _ensure_entity_or_log_exists(self, entity_id: str) -> None:
+        if self._entities.locate_entities(entity_id):
+            return
+        if await self._store.exists(entity_id):
+            return
+        raise NotFoundError(f"Entity '{entity_id}' was not found")
 
 
 def _validate_format_content(format_name: str, content: str) -> None:

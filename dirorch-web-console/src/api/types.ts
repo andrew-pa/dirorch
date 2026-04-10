@@ -53,6 +53,27 @@ export interface EntityDetail extends EntitySummary {
   json?: JsonValue
 }
 
+export interface EntityLogPayload {
+  entity_id: string
+  text: string
+  offset: number
+  next_offset: number
+  exists: boolean
+  processing: boolean
+}
+
+export interface EntityLogAppendEvent {
+  entity_id: string
+  text: string
+  next_offset: number
+  processing: boolean
+}
+
+export interface EntityLogStatusEvent {
+  entity_id: string
+  processing: boolean
+}
+
 export interface FileDetail {
   path: string
   format: ContentFormat

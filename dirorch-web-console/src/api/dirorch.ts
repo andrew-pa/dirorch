@@ -1,6 +1,7 @@
 import type {
   CreateEntityPayload,
   EntityDetail,
+  EntityLogPayload,
   EntityStatusPayload,
   FileDetail,
   UpdateEntityPayload,
@@ -33,6 +34,7 @@ export const queryKeys = {
   workflowStatus: ['workflow-status'] as const,
   entities: ['entities'] as const,
   entity: (entityId: string) => ['entity', entityId] as const,
+  entityLog: (entityId: string) => ['entity-log', entityId] as const,
   file: (path: string) => ['file', path] as const,
 }
 
@@ -71,6 +73,27 @@ export async function setEntityLocked(entityId: string, locked: boolean) {
     method: 'PUT',
     body: JSON.stringify({ locked }),
   })
+}
+
+export async function getEntityLog(
+  entityId: string,
+  offset = 0,
+  limitBytes?: number,
+) {
+  const params = new URLSearchParams({ offset: String(offset) })
+  if (limitBytes !== undefined) {
+    params.set('limit_bytes', String(limitBytes))
+  }
+  return requestJson<EntityLogPayload>(
+    `/entity/${encodeURIComponent(entityId)}/log?${params.toString()}`,
+  )
+}
+
+export function openEntityLogEvents(entityId: string, fromOffset: number) {
+  const params = new URLSearchParams({ from_offset: String(fromOffset) })
+  return new EventSource(
+    `${API_BASE}/entity/${encodeURIComponent(entityId)}/log/events?${params.toString()}`,
+  )
 }
 
 export async function getFile(path: string) {
@@ -126,4 +149,3 @@ function encodePath(path: string) {
     .map((segment) => encodeURIComponent(segment))
     .join('/')
 }
-

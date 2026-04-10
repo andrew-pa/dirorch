@@ -29,6 +29,7 @@ import type {
 } from '../api/types'
 import { extractPathReferences, tryParseJson } from '../lib/json'
 import { DocumentContentEditor } from './DocumentContentEditor'
+import { EntityLogViewer } from './EntityLogViewer'
 import { LinkedFileEditor } from './LinkedFileEditor'
 import { EmptyState } from './ui/EmptyState'
 import { SectionHeader } from './ui/SectionHeader'
@@ -91,6 +92,7 @@ export function EntityEditorModal({
   const [lockState, setLockState] = useState<'idle' | 'pending' | 'ready' | 'error'>(
     mode === 'create' ? 'ready' : 'idle',
   )
+  const [activeTab, setActiveTab] = useState<'content' | 'logs'>('content')
 
   const loadedEntityRef = useRef<EntityDetail | null>(null)
   const ownedLockRef = useRef(false)
@@ -105,12 +107,17 @@ export function EntityEditorModal({
     setSelectedFilePath(null)
     setIsEditing(true)
     setLockState('ready')
+    setActiveTab('content')
     setDraft({
       ...EMPTY_DRAFT,
       phase: initialPhase,
       state: initialState,
     })
   }, [initialPhase, initialState, mode])
+
+  useEffect(() => {
+    setActiveTab('content')
+  }, [entityId, mode])
 
   useEffect(() => {
     if (mode !== 'edit' || !detailQuery.data) {
@@ -388,147 +395,184 @@ export function EntityEditorModal({
             </div>
           ) : (
             <>
-              <div className="dialog-body">
-                <div className="entity-dialog__layout">
-                  <section className="entity-form">
-                    <div className="entity-form__grid">
-                      <label className="field">
-                        <span className="field__label">Entity</span>
-                        <input
-                          className="field__input field__input--mono"
-                          disabled={mode === 'edit'}
-                          value={draft.id}
-                          onChange={(event) => {
-                            setDraft((current) => ({
-                              ...current,
-                              id: event.target.value,
-                            }))
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span className="field__label">Phase</span>
-                        <select
-                          className="field__input"
-                          disabled={readOnly}
-                          value={draft.phase}
-                          onChange={(event) => {
-                            const nextPhase = event.target.value
-                            const nextPhaseConfig = workflow.phases.find(
-                              (phase) => phase.name === nextPhase,
-                            )
-                            const nextStates = nextPhaseConfig
-                              ? [...nextPhaseConfig.states, ...nextPhaseConfig.reserved_states]
-                              : []
-
-                            setDraft((current) => ({
-                              ...current,
-                              phase: nextPhase,
-                              state:
-                                nextStates.includes(current.state) && current.state
-                                  ? current.state
-                                  : (nextStates[0] ?? ''),
-                            }))
-                          }}
-                        >
-                          {workflow.phases.map((phase) => (
-                            <option key={phase.name} value={phase.name}>
-                              {phase.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label className="field">
-                        <span className="field__label">State</span>
-                        <select
-                          className="field__input"
-                          disabled={readOnly}
-                          value={draft.state}
-                          onChange={(event) => {
-                            const nextState = event.target.value
-                            setDraft((current) => ({ ...current, state: nextState }))
-                          }}
-                        >
-                          {stateOptions.map((stateName) => (
-                            <option key={stateName} value={stateName}>
-                              {stateName}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-
-                    <DocumentContentEditor
-                      format={draft.format}
-                      editorMode={draft.editorMode}
-                      readOnly={readOnly}
-                      rawContent={draft.rawContent}
-                      onFormatChange={(nextFormat) => {
-                        setDraft((current) => ({
-                          ...current,
-                          format: nextFormat,
-                          editorMode: nextFormat === 'json' ? current.editorMode : 'raw',
-                          rawContent:
-                            nextFormat === 'json' && current.rawContent.trim().length === 0
-                              ? '{}'
-                              : current.rawContent,
-                        }))
-                      }}
-                      onEditorModeChange={(nextMode) => {
-                        setDraft((current) => ({ ...current, editorMode: nextMode }))
-                      }}
-                      onRawContentChange={(rawContent) => {
-                        setDraft((current) => ({ ...current, rawContent }))
-                      }}
-                    />
-
-                    {pathReferences.length > 0 ? (
-                      <div className="linked-file-list">
-                        <SectionHeader
-                          className="linked-file-list__header"
-                          eyebrow="Referenced files"
-                          actions={
-                            <span className="status-pill status-pill--neutral">
-                              <FileJson2 size={14} />
-                              {pathReferences.length}
-                            </span>
-                          }
-                        />
-                        <div className="linked-file-list__items">
-                          {pathReferences.map((reference) => (
-                            <button
-                              key={`${reference.location}:${reference.value}`}
-                              className={clsx(
-                                'linked-file-list__item',
-                                selectedFilePath === reference.value && 'is-active',
-                              )}
-                              type="button"
-                              onClick={() => setSelectedFilePath(reference.value)}
-                            >
-                              <div>
-                                <div className="linked-file-list__key">{reference.location}</div>
-                                <div className="linked-file-list__path">{reference.value}</div>
-                              </div>
-                              <ChevronRight size={16} />
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </section>
-
-                  <section className="entity-dialog__side">
-                    {selectedFilePath ? (
-                      <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
-                    ) : (
-                      <EmptyState className="panel-placeholder" icon={<Plus size={16} />}>
-                        No linked file selected
-                      </EmptyState>
-                    )}
-                  </section>
+              {mode === 'edit' && entityId ? (
+                <div className="dialog-tabs">
+                  <div className="segmented-control" role="tablist" aria-label="Entity panel">
+                    <button
+                      className={clsx(
+                        'segmented-control__button',
+                        activeTab === 'content' && 'is-active',
+                      )}
+                      role="tab"
+                      type="button"
+                      aria-selected={activeTab === 'content'}
+                      onClick={() => setActiveTab('content')}
+                    >
+                      Content
+                    </button>
+                    <button
+                      className={clsx(
+                        'segmented-control__button',
+                        activeTab === 'logs' && 'is-active',
+                      )}
+                      role="tab"
+                      type="button"
+                      aria-selected={activeTab === 'logs'}
+                      onClick={() => setActiveTab('logs')}
+                    >
+                      Logs
+                    </button>
+                  </div>
                 </div>
+              ) : null}
+
+              <div className="dialog-body">
+                {activeTab === 'logs' && mode === 'edit' && entityId ? (
+                  <EntityLogViewer entityId={entityId} />
+                ) : (
+                  <div className="entity-dialog__layout">
+                    <section className="entity-form">
+                      <div className="entity-form__grid">
+                        <label className="field">
+                          <span className="field__label">Entity</span>
+                          <input
+                            className="field__input field__input--mono"
+                            disabled={mode === 'edit'}
+                            value={draft.id}
+                            onChange={(event) => {
+                              setDraft((current) => ({
+                                ...current,
+                                id: event.target.value,
+                              }))
+                            }}
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span className="field__label">Phase</span>
+                          <select
+                            className="field__input"
+                            disabled={readOnly}
+                            value={draft.phase}
+                            onChange={(event) => {
+                              const nextPhase = event.target.value
+                              const nextPhaseConfig = workflow.phases.find(
+                                (phase) => phase.name === nextPhase,
+                              )
+                              const nextStates = nextPhaseConfig
+                                ? [...nextPhaseConfig.states, ...nextPhaseConfig.reserved_states]
+                                : []
+
+                              setDraft((current) => ({
+                                ...current,
+                                phase: nextPhase,
+                                state:
+                                  nextStates.includes(current.state) && current.state
+                                    ? current.state
+                                    : (nextStates[0] ?? ''),
+                              }))
+                            }}
+                          >
+                            {workflow.phases.map((phase) => (
+                              <option key={phase.name} value={phase.name}>
+                                {phase.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="field">
+                          <span className="field__label">State</span>
+                          <select
+                            className="field__input"
+                            disabled={readOnly}
+                            value={draft.state}
+                            onChange={(event) => {
+                              const nextState = event.target.value
+                              setDraft((current) => ({ ...current, state: nextState }))
+                            }}
+                          >
+                            {stateOptions.map((stateName) => (
+                              <option key={stateName} value={stateName}>
+                                {stateName}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <DocumentContentEditor
+                        format={draft.format}
+                        editorMode={draft.editorMode}
+                        readOnly={readOnly}
+                        rawContent={draft.rawContent}
+                        onFormatChange={(nextFormat) => {
+                          setDraft((current) => ({
+                            ...current,
+                            format: nextFormat,
+                            editorMode: nextFormat === 'json' ? current.editorMode : 'raw',
+                            rawContent:
+                              nextFormat === 'json' && current.rawContent.trim().length === 0
+                                ? '{}'
+                                : current.rawContent,
+                          }))
+                        }}
+                        onEditorModeChange={(nextMode) => {
+                          setDraft((current) => ({ ...current, editorMode: nextMode }))
+                        }}
+                        onRawContentChange={(rawContent) => {
+                          setDraft((current) => ({ ...current, rawContent }))
+                        }}
+                      />
+
+                      {pathReferences.length > 0 ? (
+                        <div className="linked-file-list">
+                          <SectionHeader
+                            className="linked-file-list__header"
+                            eyebrow="Referenced files"
+                            actions={
+                              <span className="status-pill status-pill--neutral">
+                                <FileJson2 size={14} />
+                                {pathReferences.length}
+                              </span>
+                            }
+                          />
+                          <div className="linked-file-list__items">
+                            {pathReferences.map((reference) => (
+                              <button
+                                key={`${reference.location}:${reference.value}`}
+                                className={clsx(
+                                  'linked-file-list__item',
+                                  selectedFilePath === reference.value && 'is-active',
+                                )}
+                                type="button"
+                                onClick={() => setSelectedFilePath(reference.value)}
+                              >
+                                <div>
+                                  <div className="linked-file-list__key">
+                                    {reference.location}
+                                  </div>
+                                  <div className="linked-file-list__path">{reference.value}</div>
+                                </div>
+                                <ChevronRight size={16} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </section>
+
+                    <section className="entity-dialog__side">
+                      {selectedFilePath ? (
+                        <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
+                      ) : (
+                        <EmptyState className="panel-placeholder" icon={<Plus size={16} />}>
+                          No linked file selected
+                        </EmptyState>
+                      )}
+                    </section>
+                  </div>
+                )}
 
                 {saveError ? <div className="inline-error">{saveError}</div> : null}
               </div>

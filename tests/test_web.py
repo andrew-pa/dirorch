@@ -89,6 +89,28 @@ async def _wait_for_entity_state(
         await asyncio.sleep(0.05)
 
 
+async def _read_sse_event(
+    response: aiohttp.ClientResponse,
+    timeout: float = 5.0,
+) -> tuple[str | None, dict[str, object] | None]:
+    lines: list[str] = []
+    while True:
+        line = await asyncio.wait_for(response.content.readline(), timeout=timeout)
+        if line in {b"", b"\n", b"\r\n"}:
+            break
+        lines.append(line.decode("utf-8").rstrip("\r\n"))
+
+    event_name: str | None = None
+    data: str | None = None
+    for line in lines:
+        if line.startswith("event: "):
+            event_name = line.removeprefix("event: ")
+        elif line.startswith("data: "):
+            data = line.removeprefix("data: ")
+    payload = None if data is None else json.loads(data)
+    return event_name, payload
+
+
 def test_parse_args_supports_web_flags(monkeypatch) -> None:
     monkeypatch.setattr(
         sys,
@@ -234,6 +256,14 @@ phases:
                 assert workflow_status["counts"]["tasks"]["done"] == 1
                 assert workflow_status["execution"]["runner_state"] == "stopped"
 
+                async with session.get(f"{base_url}/entity/task.txt/log") as response:
+                    log_payload = await response.json()
+                assert log_payload["exists"] is True
+                assert "entity created phase=tasks state=new" in log_payload["text"]
+                assert "entity locked" in log_payload["text"]
+                assert "entity updated fields=content,format" in log_payload["text"]
+                assert "manually moved tasks/new -> tasks/done" in log_payload["text"]
+
                 async with session.post(
                     f"{base_url}/file/docs/info.json",
                     json={"format": "json", "content": json.dumps({"ok": True})},
@@ -254,6 +284,11 @@ phases:
                     reserved_payload = await response.json()
                 assert response.status == 403
                 assert reserved_payload["code"] == "forbidden"
+
+                async with session.get(f"{base_url}/file/entity_logs/task.txt.log") as response:
+                    reserved_logs_payload = await response.json()
+                assert response.status == 403
+                assert reserved_logs_payload["code"] == "forbidden"
 
                 async with session.delete(f"{base_url}/entity/task.txt") as response:
                     assert response.status == 204
@@ -509,6 +544,72 @@ phases:
                 assert final_status["counts"]["tasks"]["new"] == 0
                 assert final_status["counts"]["tasks"]["done"] == 2
                 assert final_status["locked_entities"] == 0
+        finally:
+            server_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await server_task
+
+    asyncio.run(scenario())
+
+
+def test_web_log_endpoints_stream_live_entity_output(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          python -c "import sys,time; sys.stdout.write('start\\n'); sys.stdout.flush();
+          time.sleep(0.8); sys.stdout.write('end\\n'); sys.stdout.flush()"
+""",
+    )
+    _write(tmp_path / "tasks" / "new" / "stream.txt", "payload")
+    port = _free_port()
+
+    async def scenario() -> None:
+        options = CliOptions(
+            workflow=workflow,
+            root=tmp_path,
+            retries_override=None,
+            state_file=".dirorch_runtime.json",
+            log_level="ERROR",
+            web=True,
+            web_host="127.0.0.1",
+            web_port=port,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        server_task = asyncio.create_task(run(options))
+        try:
+            await _wait_for_server(base_url)
+            async with aiohttp.ClientSession() as session:
+                await _wait_for_processing(session, base_url, "stream.txt")
+
+                async with session.get(f"{base_url}/entity/stream.txt/log") as response:
+                    initial_log = await response.json()
+                assert initial_log["exists"] is True
+                assert "transition started tasks:new -> done" in initial_log["text"]
+
+                async with session.get(
+                    f"{base_url}/entity/stream.txt/log/events?from_offset={initial_log['next_offset']}"
+                ) as response:
+                    snapshot_event, snapshot_payload = await _read_sse_event(response)
+                    assert snapshot_event == "snapshot"
+                    assert snapshot_payload is not None
+
+                    while True:
+                        event_name, payload = await _read_sse_event(response)
+                        if event_name != "append":
+                            continue
+                        assert payload is not None
+                        if "end\n" in payload["text"]:
+                            break
+
+                await _wait_for_path(tmp_path / "tasks" / "done" / "stream.txt")
         finally:
             server_task.cancel()
             with suppress(asyncio.CancelledError):

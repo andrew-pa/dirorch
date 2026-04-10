@@ -186,6 +186,28 @@ Fields:
 - `json: any`
   - present only when content parses as JSON
 
+### EntityLogPayload
+
+```json
+{
+  "entity_id": "task.txt",
+  "text": "[2026-04-09T12:34:56Z] transition started tasks:new -> done\n",
+  "offset": 0,
+  "next_offset": 61,
+  "exists": true,
+  "processing": true
+}
+```
+
+Fields:
+
+- `entity_id: string`
+- `text: string`
+- `offset: integer`
+- `next_offset: integer`
+- `exists: boolean`
+- `processing: boolean`
+
 ### RuntimeSnapshot
 
 ```json
@@ -446,6 +468,79 @@ Errors:
 - `404` if the entity does not exist
 - `409` if the entity id is ambiguous across multiple phase/state directories
 
+### GET `/entity/{id}/log`
+
+Return the rendered transcript for one entity.
+
+Path params:
+
+- `id: string`
+
+Query params:
+
+- `offset: integer` optional, default `0`
+- `limit_bytes: integer` optional
+
+Response `200`:
+
+- body schema: `EntityLogPayload`
+
+Operational semantics:
+
+- The transcript is append-only rendered text, not structured JSON events.
+- Command `stdout` and `stderr` are preserved exactly as observed, including ANSI/control sequences.
+- Transition and selector outcomes are rendered as prefixed system lines.
+- If the entity exists but no transcript has been created yet, `exists` is `false` and `text` is empty.
+
+Errors:
+
+- `404` if neither the entity nor an existing transcript can be found
+
+### GET `/entity/{id}/log/events`
+
+Open a server-sent events stream for live transcript updates.
+
+Path params:
+
+- `id: string`
+
+Query params:
+
+- `from_offset: integer` optional, default `0`
+
+Response `200`:
+
+- content type: `text/event-stream`
+
+Event types:
+
+- `snapshot`: immediate transcript payload from `from_offset`
+- `append`: newly appended transcript text
+- `status`: processing state change
+
+Example:
+
+```text
+event: snapshot
+data: {"entity_id":"task.txt","text":"","offset":61,"next_offset":61,"exists":true,"processing":true}
+
+event: append
+data: {"entity_id":"task.txt","text":"stdout chunk\n","next_offset":74,"processing":true}
+
+event: status
+data: {"entity_id":"task.txt","processing":false}
+```
+
+Operational semantics:
+
+- A `snapshot` event is sent immediately after connect.
+- Keepalive comments may be sent while idle.
+- Clients can reconnect with `from_offset=<last next_offset>` to resume without rereading older bytes.
+
+Errors:
+
+- `404` if neither the entity nor an existing transcript can be found
+
 ### POST `/entity`
 
 Create a new entity file.
@@ -620,6 +715,7 @@ Forbidden path categories:
 - absolute paths
 - paths containing `..`
 - phase top-level directories such as `tasks/...`
+- `entity_logs/...`
 - the runtime state file, typically `.dirorch_runtime.json`
 - the lock file `.dirorch_locks.json`
 
@@ -727,3 +823,4 @@ Errors:
 - Read endpoints reflect the current in-process view of the filesystem and runner state.
 - `processing=true` is only true while the current process is actively executing that entity.
 - When `--web` is enabled without `--watch`, the workflow performs its normal initial pass and then stops, but the API server remains available until process shutdown.
+- Per-entity logs are stored under `${root}/entity_logs/` and are intentionally excluded from the generic `/file` API.

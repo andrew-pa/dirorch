@@ -13,6 +13,13 @@ from .config_loader import load_workflow
 from .constants import LOCKS_FILE_NAME
 from .entities import EntityStore
 from .env import build_defined_hook_env, build_hook_env_from_defined
+from .entity_logging import (
+    EntityLogBroadcaster,
+    EntityLogRouter,
+    EntityTranscriptFormatter,
+    EntityTranscriptSink,
+    EntityTranscriptStore,
+)
 from .execution import ExecutionStatusTracker
 from .files import FileStore
 from .hooks import HookRunner, HookRunnerConfig
@@ -21,6 +28,7 @@ from .models import CliOptions
 from .services import (
     EntityAdminService,
     FileAdminService,
+    EntityLogService,
     MutationCoordinator,
     WorkflowDefinitionService,
     WorkflowStatusService,
@@ -151,6 +159,17 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
     locks = EntityLockStore(options.root, LOCKS_FILE_NAME)
     entities = EntityStore(options.root, config)
     files = FileStore(options.root, config, options.state_file, LOCKS_FILE_NAME)
+    transcript_store = EntityTranscriptStore(options.root)
+    broadcaster = EntityLogBroadcaster()
+    entity_log_emitter = EntityLogRouter(
+        (
+            EntityTranscriptSink(
+                EntityTranscriptFormatter(),
+                transcript_store,
+                broadcaster,
+            ),
+        )
+    )
     hook_runner = HookRunner(
         HookRunnerConfig(
             root=options.root,
@@ -158,6 +177,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             template_env=template_env,
             retries=retries,
             logger=logger,
+            entity_log_emitter=entity_log_emitter,
         )
     )
     engine = WorkflowEngine(
@@ -169,6 +189,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             logger=logger,
             execution_observer=tracker,
             is_entity_locked=locks.is_locked,
+            entity_log_emitter=entity_log_emitter,
         ),
     )
     workflow_runner = WorkflowRunner(
@@ -186,6 +207,13 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             locks=locks,
             tracker=tracker,
             coordinator=coordinator,
+            entity_log_emitter=entity_log_emitter,
+        )
+        log_service = EntityLogService(
+            entities=entities,
+            tracker=tracker,
+            store=transcript_store,
+            broadcaster=broadcaster,
         )
         services = WebServices(
             definition=WorkflowDefinitionService(config),
@@ -197,6 +225,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
                 config=config,
             ),
             entities=entity_service,
+            logs=log_service,
             files=FileAdminService(files, coordinator),
         )
         web_server = WebServer(

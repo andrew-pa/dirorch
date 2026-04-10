@@ -600,6 +600,10 @@
   font-size: 1.8rem;
 }
 
+.dialog-tabs {
+  padding: 0 1.25rem 0.8rem;
+}
+
 .dialog-body {
   display: flex;
   flex: 1;
@@ -753,6 +757,60 @@
   box-shadow: inset 0 0 0 1px rgba(127, 156, 180, 0.1);
 }
 
+.entity-log-viewer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+}
+
+.entity-log-viewer__header,
+.entity-log-viewer__status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.entity-log-viewer__status {
+  flex-wrap: wrap;
+}
+
+.entity-log-viewer__body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 20rem;
+  overflow: hidden;
+  border: 1px solid rgba(69, 232, 255, 0.16);
+  border-radius: 0.12rem;
+  background:
+    radial-gradient(circle at top left, rgba(69, 232, 255, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(5, 10, 17, 0.98), rgba(4, 8, 13, 0.98));
+}
+
+.entity-log-viewer__terminal {
+  width: 100%;
+  min-height: 20rem;
+  padding: 0.75rem 0.6rem;
+}
+
+.entity-log-viewer__terminal .xterm,
+.entity-log-viewer__terminal .xterm-screen,
+.entity-log-viewer__terminal .xterm-viewport {
+  height: 100%;
+}
+
+.entity-log-viewer__terminal .xterm-viewport {
+  scrollbar-color: rgba(69, 232, 255, 0.28) rgba(6, 12, 19, 0.9);
+}
+
+.entity-log-viewer__empty,
+.entity-log-viewer__error {
+  position: absolute;
+  inset: 1rem;
+}
+
 .dialog-loading,
 .app-state {
   display: flex;
@@ -839,6 +897,7 @@
   }
 
   .dialog-header,
+  .dialog-tabs,
   .dialog-body,
   .dialog-footer {
     padding-left: 0.9rem;

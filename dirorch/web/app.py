@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -15,10 +17,13 @@ from ..errors import (
 )
 from ..services import (
     EntityAdminService,
+    EntityLogService,
     FileAdminService,
     WorkflowDefinitionService,
     WorkflowStatusService,
 )
+
+LOG_STREAM_HEARTBEAT_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -26,6 +31,7 @@ class WebServices:
     definition: WorkflowDefinitionService
     status: WorkflowStatusService
     entities: EntityAdminService
+    logs: EntityLogService
     files: FileAdminService
 
 
@@ -41,6 +47,8 @@ def build_web_app(services: WebServices) -> web.Application:
             web.get("/status/workflow", _get_workflow_status),
             web.get("/status/entities", _get_entity_status),
             web.get("/entity/{id}", _get_entity),
+            web.get("/entity/{id}/log", _get_entity_log),
+            web.get("/entity/{id}/log/events", _get_entity_log_events),
             web.post("/entity", _post_entity),
             web.put("/entity/{id}", _put_entity),
             web.put("/entity/{id}/lock", _put_entity_lock),
@@ -136,6 +144,79 @@ async def _get_entity_status(request: web.Request) -> web.Response:
 async def _get_entity(request: web.Request) -> web.Response:
     services = _services(request)
     return web.json_response(services.entities.get_entity(request.match_info["id"]))
+
+
+async def _get_entity_log(request: web.Request) -> web.Response:
+    services = _services(request)
+    entity_id = request.match_info["id"]
+    offset = _optional_int_query(request, "offset", default=0, minimum=0)
+    limit_bytes = _optional_int_query(request, "limit_bytes", default=None, minimum=1)
+    payload = await services.logs.get_log(entity_id, offset=offset, limit_bytes=limit_bytes)
+    return web.json_response(payload)
+
+
+async def _get_entity_log_events(request: web.Request) -> web.StreamResponse:
+    services = _services(request)
+    entity_id = request.match_info["id"]
+    from_offset = _optional_int_query(request, "from_offset", default=0, minimum=0)
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await response.prepare(request)
+    queue = await services.logs.subscribe(entity_id)
+    last_processing = services.logs.is_processing(entity_id)
+    try:
+        snapshot = await services.logs.get_log(entity_id, offset=from_offset)
+        await _write_sse_event(response, "snapshot", snapshot)
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=LOG_STREAM_HEARTBEAT_SECONDS,
+                )
+            except TimeoutError:
+                processing = services.logs.is_processing(entity_id)
+                if processing != last_processing:
+                    last_processing = processing
+                    await _write_sse_event(
+                        response,
+                        "status",
+                        {
+                            "entity_id": entity_id,
+                            "processing": processing,
+                        },
+                    )
+                else:
+                    await response.write(b": keepalive\n\n")
+                continue
+
+            last_processing = services.logs.is_processing(entity_id)
+            await _write_sse_event(
+                response,
+                "append",
+                {
+                    "entity_id": entity_id,
+                    "text": chunk.text,
+                    "next_offset": chunk.offset_end,
+                    "processing": last_processing,
+                },
+            )
+    except ConnectionResetError:
+        return response
+    except RuntimeError as exc:
+        if "closing transport" in str(exc).lower():
+            return response
+        raise
+    except asyncio.CancelledError:
+        raise
+    finally:
+        await services.logs.unsubscribe(entity_id, queue)
 
 
 async def _post_entity(request: web.Request) -> web.Response:
@@ -244,6 +325,34 @@ def _optional_string(payload: dict[str, Any], key: str) -> str | None:
     if not isinstance(value, str) or not value:
         raise ValidationError(f"'{key}' must be a non-empty string when provided")
     return value
+
+
+def _optional_int_query(
+    request: web.Request,
+    key: str,
+    *,
+    default: int | None,
+    minimum: int,
+) -> int | None:
+    raw = request.query.get(key)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValidationError(f"'{key}' must be an integer") from exc
+    if value < minimum:
+        raise ValidationError(f"'{key}' must be >= {minimum}")
+    return value
+
+
+async def _write_sse_event(
+    response: web.StreamResponse,
+    event_name: str,
+    payload: dict[str, Any],
+) -> None:
+    data = json.dumps(payload, separators=(",", ":"))
+    await response.write(f"event: {event_name}\ndata: {data}\n\n".encode("utf-8"))
 
 
 def _error_payload(code: str, message: str) -> dict[str, Any]:
