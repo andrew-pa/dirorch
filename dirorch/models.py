@@ -17,12 +17,32 @@ class HookConfig:
 
 
 @dataclass(frozen=True)
+class NamedTargetConfig:
+    constant: str | None = None
+    hook: HookConfig | None = None
+
+    def __post_init__(self) -> None:
+        if (self.constant is None) == (self.hook is None):
+            raise ValueError("NamedTargetConfig requires exactly one target source")
+
+    @property
+    def dynamic(self) -> bool:
+        return self.hook is not None
+
+    @property
+    def display_name(self) -> str:
+        if self.constant is not None:
+            return self.constant
+        return "<dynamic>"
+
+
+@dataclass(frozen=True)
 class TransitionConfig:
     source: str
-    destination: str
+    destination: NamedTargetConfig
     cmd: str | None = None
     stdin: str | None = None
-    jump: str | None = None
+    jump_target: NamedTargetConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -63,7 +83,9 @@ class CliOptions:
 @dataclass(frozen=True)
 class TransitionResult:
     moved: bool
-    jump: str | None
+    failed: bool
+    destination_state: str | None
+    jump_phase: str | None
 
 
 @dataclass(frozen=True)

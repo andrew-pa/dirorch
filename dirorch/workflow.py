@@ -19,6 +19,7 @@ from .hooks import HookRunner
 from .models import (
     Group,
     HookConfig,
+    NamedTargetConfig,
     PhaseConfig,
     TransitionConfig,
     TransitionResult,
@@ -43,6 +44,7 @@ EntityLockChecker = Callable[[str], bool]
 class PhaseProcessorDeps:
     hook_runner: HookRunner
     entities: EntityStore
+    phase_names: frozenset[str]
     logger: logging.Logger
     jump_handler: JumpHandler
     load_entity_cursor: EntityCursorLoader
@@ -58,6 +60,7 @@ class PhaseProcessor:
     def __init__(self, deps: PhaseProcessorDeps, config: PhaseConfig) -> None:
         self._hook_runner = deps.hook_runner
         self._entities = deps.entities
+        self._phase_names = deps.phase_names
         self._logger = deps.logger
         self._jump_handler = deps.jump_handler
         self._load_entity_cursor = deps.load_entity_cursor
@@ -101,41 +104,194 @@ class PhaseProcessor:
         entity: Path,
     ) -> TransitionResult:
         if not entity.exists():
-            return TransitionResult(moved=False, jump=None)
+            return TransitionResult(
+                moved=False,
+                failed=False,
+                destination_state=None,
+                jump_phase=None,
+            )
 
-        context = (
-            f"transition hook {self.config.name}:{transition.source}->{transition.destination} "
-            f"entity={entity.name}"
-        )
+        context = self._transition_context(transition, entity)
         extra_env = {"INPUT_ENTITY": str(entity.resolve())}
 
-        if transition.cmd is None:
-            success = True
-        else:
-            success = await self._hook_runner.run(
-                HookConfig(cmd=transition.cmd, stdin=transition.stdin), extra_env, context
+        if not await self._run_transition_side_effect(transition, extra_env, context):
+            return await self._handle_transition_failure(transition, entity)
+
+        try:
+            destination_state = await self._resolve_transition_destination(
+                transition,
+                extra_env,
+                context,
+            )
+        except WorkflowError as exc:
+            return await self._handle_transition_failure(
+                transition,
+                entity,
+                reason=str(exc),
+            )
+        if destination_state is None:
+            return TransitionResult(
+                moved=False,
+                failed=False,
+                destination_state=None,
+                jump_phase=None,
             )
 
-        if success:
-            await self._entities.move_to_state(
-                self.config.name, transition.destination, entity
+        try:
+            jump_phase = await self._resolve_transition_jump(
+                transition,
+                extra_env,
+                context,
             )
-            self._logger.info(
-                "Moved entity '%s' to %s/%s",
+        except WorkflowError as exc:
+            return await self._handle_transition_failure(
+                transition,
+                entity,
+                reason=str(exc),
+            )
+        if destination_state not in self.config.states:
+            return await self._handle_transition_failure(
+                transition,
+                entity,
+                reason=f"selected invalid destination state '{destination_state}'",
+            )
+        if jump_phase is not None and jump_phase not in self._phase_names:
+            return await self._handle_transition_failure(
+                transition,
+                entity,
+                reason=f"selected invalid jump phase '{jump_phase}'",
+            )
+
+        return await self._apply_successful_transition(
+            transition,
+            entity,
+            destination_state,
+            jump_phase,
+        )
+
+    def _transition_context(self, transition: TransitionConfig, entity: Path) -> str:
+        return (
+            "transition hook "
+            f"{self.config.name}:{transition.source}->{transition.destination.display_name} "
+            f"entity={entity.name}"
+        )
+
+    async def _run_transition_side_effect(
+        self,
+        transition: TransitionConfig,
+        extra_env: dict[str, str],
+        context: str,
+    ) -> bool:
+        if transition.cmd is None:
+            return True
+        return await self._hook_runner.run(
+            HookConfig(cmd=transition.cmd, stdin=transition.stdin),
+            extra_env,
+            context,
+        )
+
+    async def _resolve_transition_destination(
+        self,
+        transition: TransitionConfig,
+        extra_env: dict[str, str],
+        context: str,
+    ) -> str | None:
+        return await self._resolve_named_target(
+            transition.destination,
+            extra_env,
+            f"{context} destination selector",
+        )
+
+    async def _resolve_transition_jump(
+        self,
+        transition: TransitionConfig,
+        extra_env: dict[str, str],
+        context: str,
+    ) -> str | None:
+        if transition.jump_target is None:
+            return None
+        return await self._resolve_named_target(
+            transition.jump_target,
+            extra_env,
+            f"{context} jump selector",
+        )
+
+    async def _resolve_named_target(
+        self,
+        target: NamedTargetConfig,
+        extra_env: dict[str, str],
+        context: str,
+    ) -> str | None:
+        if target.constant is not None:
+            return target.constant
+
+        assert target.hook is not None
+        result = await self._hook_runner.run_command(
+            target.hook,
+            extra_env,
+            context,
+            capture_selector_output=True,
+        )
+        if not result.succeeded:
+            raise WorkflowError(f"{context} failed after retries")
+        return result.selector_output or None
+
+    async def _handle_transition_failure(
+        self,
+        transition: TransitionConfig,
+        entity: Path,
+        *,
+        reason: str | None = None,
+    ) -> TransitionResult:
+        await self._entities.move_to_state(self.config.name, FAILED_STATE, entity)
+        if reason is None:
+            self._logger.error(
+                "Transition failed for '%s'; moved to %s/%s",
                 entity.name,
                 self.config.name,
-                transition.destination,
+                FAILED_STATE,
             )
-            return TransitionResult(moved=True, jump=transition.jump)
+        else:
+            self._logger.error(
+                "Transition failed for '%s': %s; moved to %s/%s",
+                entity.name,
+                reason,
+                self.config.name,
+                FAILED_STATE,
+            )
+        return TransitionResult(
+            moved=False,
+            failed=True,
+            destination_state=None,
+            jump_phase=None,
+        )
 
-        await self._entities.move_to_state(self.config.name, FAILED_STATE, entity)
-        self._logger.error(
-            "Transition failed for '%s'; moved to %s/%s",
+    async def _apply_successful_transition(
+        self,
+        transition: TransitionConfig,
+        entity: Path,
+        destination_state: str,
+        jump_phase: str | None,
+    ) -> TransitionResult:
+        await self._entities.move_to_state(self.config.name, destination_state, entity)
+        self._logger.info(
+            "Moved entity '%s' to %s/%s",
             entity.name,
             self.config.name,
-            FAILED_STATE,
+            destination_state,
         )
-        return TransitionResult(moved=False, jump=None)
+        return TransitionResult(
+            moved=True,
+            failed=False,
+            destination_state=destination_state,
+            jump_phase=jump_phase,
+        )
+
+    def _configured_destination_state(
+        self,
+        transition: TransitionConfig,
+    ) -> str | None:
+        return transition.destination.constant
 
 
 class AllAtOncePhaseProcessor(PhaseProcessor):
@@ -174,8 +330,8 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
             for result in results:
                 if result.moved:
                     moved += 1
-                    if result.jump is not None:
-                        jumps.append(result.jump)
+                    if result.jump_phase is not None:
+                        jumps.append(result.jump_phase)
         return moved, jumps
 
     def _groups_for_entities(self, entities: list[Path]) -> list[Group]:
@@ -193,7 +349,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                 "Running transition %s.%s -> %s for %d concurrent entities (group=%s)",
                 self.config.name,
                 transition.source,
-                transition.destination,
+                transition.destination.display_name,
                 len(group.entities),
                 group.key,
             )
@@ -202,7 +358,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                 self.config.name,
                 self.config.mode,
                 transition.source,
-                transition.destination,
+                self._configured_destination_state(transition),
                 entity_ids,
             )
             tasks = [
@@ -215,7 +371,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                 self._execution_observer.transition_finished(
                     self.config.name,
                     transition.source,
-                    transition.destination,
+                    self._configured_destination_state(transition),
                     entity_ids,
                 )
         entity_ids = (group.entities[0].name,)
@@ -223,7 +379,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
             self.config.name,
             self.config.mode,
             transition.source,
-            transition.destination,
+            self._configured_destination_state(transition),
             entity_ids,
         )
         try:
@@ -235,7 +391,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
             self._execution_observer.transition_finished(
                 self.config.name,
                 transition.source,
-                transition.destination,
+                self._configured_destination_state(transition),
                 entity_ids,
             )
 
@@ -312,7 +468,7 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
                 self.config.name,
                 self.config.mode,
                 transition.source,
-                transition.destination,
+                self._configured_destination_state(transition),
                 entity_ids,
             )
             try:
@@ -321,7 +477,7 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
                 self._execution_observer.transition_finished(
                     self.config.name,
                     transition.source,
-                    transition.destination,
+                    self._configured_destination_state(transition),
                     entity_ids,
                 )
             if not result.moved:
@@ -329,12 +485,13 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
                 return moved
 
             moved += 1
+            assert result.destination_state is not None
             current = (
-                self._entities.dir_for(self.config.name, transition.destination)
+                self._entities.dir_for(self.config.name, result.destination_state)
                 / current.name
             )
-            if result.jump is not None:
-                await self._jump_handler(result.jump, self.config.name)
+            if result.jump_phase is not None:
+                await self._jump_handler(result.jump_phase, self.config.name)
 
 
 PHASE_PROCESSOR_FOR_MODE = {
@@ -374,6 +531,7 @@ class WorkflowEngine:
         self._phase_processor_deps = PhaseProcessorDeps(
             hook_runner=deps.hook_runner,
             entities=deps.entities,
+            phase_names=frozenset(self._phases),
             logger=deps.logger,
             jump_handler=self._run_jump,
             load_entity_cursor=self._load_entity_cursor,

@@ -310,14 +310,20 @@ Per-phase fields:
 Transition fields:
 
 - `from: string`
-- `to: string`
+- `to: string | { cmd: string, stdin: string | null }`
 - `cmd: string | null`
-- `jump: string | null`
+- `jump: string | { cmd: string, stdin: string | null } | null`
 
 Completion/init hook fields:
 
 - `cmd: string`
 - `stdin: string | null`
+
+Dynamic target semantics:
+
+- Transition side-effect `cmd` runs before dynamic `to` or dynamic `jump` selectors.
+- Selector commands must write the chosen state or phase name to fd `3`.
+- Empty dynamic `to` output means no move; empty dynamic `jump` output means no jump.
 
 Errors:
 

@@ -226,7 +226,8 @@ function PhasePanel({
 }: PhasePanelProps) {
   const stateNames = stateNamesForPhase(phase)
   const statesContainerRef = useRef<HTMLDivElement | null>(null)
-  const connectorHeight = phase.transitions.length > 0 ? 18 : 0
+  const staticTransitions = phase.transitions.filter(isStaticTransition)
+  const connectorHeight = staticTransitions.length > 0 ? 18 : 0
 
   return (
     <Surface
@@ -312,6 +313,12 @@ function PhasePanel({
               stateName,
               'destination',
             )
+            const dynamicOutgoingTransitions = phase.transitions.filter(
+              (transition) =>
+                transition.from === stateName &&
+                (typeof transition.to !== 'string' ||
+                  (transition.jump !== null && typeof transition.jump !== 'string')),
+            )
             const dropTargetActive = dropTargetKey === stateKey
             const draggedEntity = draggedEntityId
               ? entities.find((entity) => entity.id === draggedEntityId) ?? null
@@ -374,6 +381,21 @@ function PhasePanel({
                 <header className="state-card__header">
                   <div>
                     <div className="state-card__name">{stateName}</div>
+                    {dynamicOutgoingTransitions.length > 0 ? (
+                      <div className="state-card__transition-tags">
+                        {dynamicOutgoingTransitions.map((transition, index) => (
+                          <Tooltip
+                            key={`${phase.name}:${stateName}:${index}`}
+                            content={<TransitionTooltipContent transition={transition} />}
+                          >
+                            <button className="state-card__transition-tag" type="button">
+                              <ArrowRight size={12} />
+                              <span>dynamic</span>
+                            </button>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="state-card__actions">
@@ -505,13 +527,15 @@ interface TransitionGraphProps {
   status: WorkflowStatusPayload
 }
 
+type StaticTransitionDefinition = TransitionDefinition & { to: string }
+
 interface RoutedTransition {
   index: number
   sourceOrder: number
   sourceTotal: number
   targetOrder: number
   targetTotal: number
-  transition: TransitionDefinition
+  transition: StaticTransitionDefinition
 }
 
 interface TransitionShape {
@@ -540,7 +564,8 @@ function TransitionGraph({
 }: TransitionGraphProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [layoutSnapshot, setLayoutSnapshot] = useState<GraphLayoutSnapshot | null>(null)
-  const orderedTransitions = [...phase.transitions].sort((left, right) => {
+  const graphedTransitions = phase.transitions.filter(isStaticTransition)
+  const orderedTransitions = [...graphedTransitions].sort((left, right) => {
     const leftDistance = Math.abs(
       stateNames.indexOf(left.to) - stateNames.indexOf(left.from),
     )
@@ -672,7 +697,7 @@ function TransitionGraph({
         >
           <button
             className="transition-graph__trigger"
-            aria-label={`Show transition ${route.transition.from} to ${route.transition.to}`}
+            aria-label={`Show transition ${route.transition.from} to ${targetLabel(route.transition.to)}`}
             style={{
               left: `${shape.triggerX}px`,
               top: `${shape.triggerY}px`,
@@ -695,12 +720,32 @@ function TransitionTooltipContent({
   return (
     <div className="transition-tooltip">
       <div className="transition-tooltip__title">
-        {transition.from} {'->'} {transition.to}
+        {transition.from} {'->'} {targetLabel(transition.to)}
       </div>
       <div>cmd: {transition.cmd ?? 'implicit move'}</div>
-      <div>jump: {transition.jump ?? 'none'}</div>
+      {typeof transition.to === 'string' ? null : <div>to selector: {transition.to.cmd}</div>}
+      <div>jump: {transition.jump === null ? 'none' : targetLabel(transition.jump)}</div>
+      {transition.jump && typeof transition.jump !== 'string' ? (
+        <div>jump selector: {transition.jump.cmd}</div>
+      ) : null}
     </div>
   )
+}
+
+function isStaticTransition(
+  transition: TransitionDefinition,
+): transition is StaticTransitionDefinition {
+  return typeof transition.to === 'string'
+}
+
+function targetLabel(target: TransitionDefinition['to'] | TransitionDefinition['jump']) {
+  if (target === null) {
+    return 'none'
+  }
+  if (typeof target === 'string') {
+    return target
+  }
+  return `dynamic (${target.cmd})`
 }
 
 function transitionGeometry(

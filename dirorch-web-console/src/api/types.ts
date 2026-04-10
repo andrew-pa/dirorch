@@ -10,15 +10,17 @@ export type JsonValue =
 
 export interface TransitionDefinition {
   from: string
-  to: string
+  to: NamedTargetDefinition
   cmd: string | null
-  jump: string | null
+  jump: NamedTargetDefinition | null
 }
 
 export interface CompletionHook {
   cmd: string
   stdin: string | null
 }
+
+export type NamedTargetDefinition = string | CompletionHook
 
 export interface PhaseDefinition {
   name: string
@@ -125,4 +127,3 @@ export interface WriteFilePayload {
   format: ContentFormat
   content: string
 }
-

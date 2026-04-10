@@ -12,7 +12,13 @@ from .constants import (
     PHASE_MODE_TRANSITIONS,
 )
 from .errors import WorkflowError
-from .models import HookConfig, PhaseConfig, TransitionConfig, WorkflowConfig
+from .models import (
+    HookConfig,
+    NamedTargetConfig,
+    PhaseConfig,
+    TransitionConfig,
+    WorkflowConfig,
+)
 
 
 def load_workflow(path: Path) -> WorkflowConfig:
@@ -83,6 +89,42 @@ def _parse_optional_hook(payload: dict[str, Any], field_name: str) -> HookConfig
         raise WorkflowError(f"'{field_name}' hook {exc}") from exc
 
 
+def _parse_named_target(
+    raw_target: Any,
+    *,
+    phase_name: str,
+    transition_label: str,
+    field_name: str,
+    required: bool,
+) -> NamedTargetConfig | None:
+    if raw_target is None:
+        if required:
+            raise WorkflowError(
+                f"Phase '{phase_name}' transition '{transition_label}' is missing valid '{field_name}'"
+            )
+        return None
+
+    if isinstance(raw_target, str):
+        if not raw_target:
+            raise WorkflowError(
+                f"Phase '{phase_name}' transition '{transition_label}' has invalid '{field_name}'"
+            )
+        return NamedTargetConfig(constant=raw_target)
+
+    if not isinstance(raw_target, dict):
+        raise WorkflowError(
+            f"Phase '{phase_name}' transition '{transition_label}' has invalid '{field_name}'"
+        )
+
+    try:
+        hook = _parse_hook(raw_target)
+    except WorkflowError as exc:
+        raise WorkflowError(
+            f"Phase '{phase_name}' transition '{transition_label}' {field_name} selector {exc}"
+        ) from exc
+    return NamedTargetConfig(hook=hook)
+
+
 def _parse_phases(raw_phases: dict[str, Any]) -> tuple[PhaseConfig, ...]:
     phases: list[PhaseConfig] = []
     for phase_name, raw_phase in raw_phases.items():
@@ -147,34 +189,41 @@ def _parse_transitions(
             )
 
         source = item.get("from")
-        destination = item.get("to")
         cmd = item.get("cmd")
         stdin = item.get("stdin")
-        jump = item.get("jump")
 
         if not isinstance(source, str) or not source:
             raise WorkflowError(
                 f"Phase '{phase_name}' transition is missing valid 'from'"
             )
-        if not isinstance(destination, str) or not destination:
-            raise WorkflowError(
-                f"Phase '{phase_name}' transition is missing valid 'to'"
-            )
+        transition_label = f"{source}->?"
+        destination = _parse_named_target(
+            item.get("to"),
+            phase_name=phase_name,
+            transition_label=transition_label,
+            field_name="to",
+            required=True,
+        )
+        assert destination is not None
+        transition_label = f"{source}->{destination.display_name}"
+        jump_target = _parse_named_target(
+            item.get("jump"),
+            phase_name=phase_name,
+            transition_label=transition_label,
+            field_name="jump",
+            required=False,
+        )
         if cmd is not None and (not isinstance(cmd, str) or not cmd.strip()):
             raise WorkflowError(
-                f"Phase '{phase_name}' transition '{source}->{destination}' has invalid 'cmd'"
+                f"Phase '{phase_name}' transition '{transition_label}' has invalid 'cmd'"
             )
         if stdin is not None and not isinstance(stdin, str):
             raise WorkflowError(
-                f"Phase '{phase_name}' transition '{source}->{destination}' has invalid 'stdin'"
+                f"Phase '{phase_name}' transition '{transition_label}' has invalid 'stdin'"
             )
         if cmd is None and stdin is not None:
             raise WorkflowError(
-                f"Phase '{phase_name}' transition '{source}->{destination}' requires 'cmd' when 'stdin' is set"
-            )
-        if jump is not None and (not isinstance(jump, str) or not jump):
-            raise WorkflowError(
-                f"Phase '{phase_name}' transition '{source}->{destination}' has invalid 'jump'"
+                f"Phase '{phase_name}' transition '{transition_label}' requires 'cmd' when 'stdin' is set"
             )
 
         transitions.append(
@@ -183,7 +232,7 @@ def _parse_transitions(
                 destination=destination,
                 cmd=cmd,
                 stdin=stdin,
-                jump=jump,
+                jump_target=jump_target,
             )
         )
     return tuple(transitions)
@@ -244,13 +293,20 @@ def _validate_workflow(phases: tuple[PhaseConfig, ...]) -> None:
                 raise WorkflowError(
                     f"Phase '{phase.name}' transition source '{transition.source}' is not a phase state"
                 )
-            if transition.destination not in states:
+            if (
+                transition.destination.constant is not None
+                and transition.destination.constant not in states
+            ):
                 raise WorkflowError(
-                    f"Phase '{phase.name}' transition destination '{transition.destination}' is not a phase state"
+                    f"Phase '{phase.name}' transition destination '{transition.destination.constant}' is not a phase state"
                 )
-            if transition.jump is not None and transition.jump not in phase_names:
+            if (
+                transition.jump_target is not None
+                and transition.jump_target.constant is not None
+                and transition.jump_target.constant not in phase_names
+            ):
                 raise WorkflowError(
-                    f"Phase '{phase.name}' transition jump target '{transition.jump}' is undefined"
+                    f"Phase '{phase.name}' transition jump target '{transition.jump_target.constant}' is undefined"
                 )
 
 

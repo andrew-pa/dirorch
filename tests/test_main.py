@@ -85,6 +85,38 @@ phases:
     assert config.init.cmd == "echo init"
 
 
+def test_load_workflow_accepts_dynamic_transition_targets(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, review, done]
+    transitions:
+      - from: new
+        to:
+          cmd: "printf '%s\\n' review >&3"
+          stdin: "{{ INPUT_ENTITY }}"
+        jump:
+          cmd: "printf '%s\\n' audit >&3"
+  audit:
+    states: [new, done]
+""",
+    )
+
+    config = load_workflow(workflow)
+    transition = config.phases[0].transitions[0]
+
+    assert transition.destination.constant is None
+    assert transition.destination.hook is not None
+    assert transition.destination.hook.cmd == "printf '%s\n' review >&3"
+    assert transition.destination.hook.stdin == "{{ INPUT_ENTITY }}"
+    assert transition.jump_target is not None
+    assert transition.jump_target.hook is not None
+    assert transition.jump_target.hook.cmd == "printf '%s\n' audit >&3"
+
+
 @pytest.mark.parametrize(
     "yaml_text, expected",
     [
@@ -152,6 +184,41 @@ phases:
         stdin: "x"
 """,
             "requires 'cmd' when 'stdin' is set",
+        ),
+        (
+            """
+phases:
+  p:
+    states: [new, done]
+    transitions:
+      - from: new
+""",
+            "missing valid 'to'",
+        ),
+        (
+            """
+phases:
+  p:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          stdin: hello
+""",
+            "to selector has invalid 'cmd'",
+        ),
+        (
+            """
+phases:
+  p:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        jump:
+          stdin: hello
+""",
+            "jump selector has invalid 'cmd'",
         ),
     ],
 )
@@ -657,6 +724,135 @@ phases:
     assert (tmp_path / "tasks" / "done" / "task.txt").exists()
 
 
+def test_dynamic_destination_runs_after_side_effect(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    marker = tmp_path / "marker.txt"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, review, done]
+    transitions:
+      - from: new
+        cmd: >
+          printf '%s' ready > "{marker}"
+        to:
+          cmd: >
+            if [ "$(cat "{marker}")" = "ready" ]; then printf '%s\\n' review >&3; else exit 7; fi
+      - from: review
+        to: done
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+
+
+def test_dynamic_destination_uses_fd_three_not_stdout(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: >
+            printf '%s\\n' ignored;
+            printf '%s\\n' done >&3;
+            printf '%s\\n' ignored >&2
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+
+
+def test_dynamic_destination_empty_output_leaves_entity_in_place(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: "true"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "new" / "item.txt").exists()
+    assert not (tmp_path / "tasks" / "done" / "item.txt").exists()
+    assert not (tmp_path / "tasks" / FAILED_STATE / "item.txt").exists()
+
+
+def test_dynamic_destination_invalid_output_moves_to_failed(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: "printf '%s\\n' nowhere >&3"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / FAILED_STATE / "item.txt").exists()
+
+
+def test_dynamic_destination_retries_then_succeeds(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    marker = tmp_path / "selector.marker"
+    _write(
+        workflow,
+        f"""
+retries: 1
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: >
+            if [ -f "{marker}" ]; then printf '%s\\n' done >&3; else touch "{marker}"; exit 9; fi
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+
+
 def test_template_renderer_auto_reloads_included_fragments(tmp_path: Path) -> None:
     fragment = tmp_path / "templates" / "snippet.j2"
     fragment.parent.mkdir(parents=True)
@@ -852,6 +1048,104 @@ phases:
     assert (tmp_path / "subtasks" / "complete" / "sub-a.txt").exists()
 
 
+def test_dynamic_jump_runs_target_phase_to_fixpoint(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cp "$INPUT_ENTITY" "$DIR_SUBTASKS_NEW/sub-$(basename "$INPUT_ENTITY")"
+        jump:
+          cmd: "printf '%s\\n' subtasks >&3"
+  subtasks:
+    states: [new, complete]
+    transitions:
+      - from: new
+        to: complete
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "a.txt").exists()
+    assert (tmp_path / "subtasks" / "complete" / "sub-a.txt").exists()
+
+
+def test_dynamic_jump_empty_output_skips_jump(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          cp "$INPUT_ENTITY" "$DIR_SUBTASKS_NEW/sub-$(basename "$INPUT_ENTITY")"
+        jump:
+          cmd: "true"
+    completions:
+      - cmd: >
+          echo tasks-complete >> "{trace_file}"
+  subtasks:
+    states: [new, complete]
+    transitions:
+      - from: new
+        to: complete
+        cmd: >
+          echo subtasks-ran >> "{trace_file}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "a.txt").exists()
+    assert trace_file.read_text(encoding="utf-8").splitlines()[:2] == [
+        "tasks-complete",
+        "subtasks-ran",
+    ]
+
+
+def test_dynamic_jump_invalid_output_moves_to_failed(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        jump:
+          cmd: "printf '%s\\n' nowhere >&3"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / FAILED_STATE / "a.txt").exists()
+    assert not (tmp_path / "tasks" / "done" / "a.txt").exists()
+
+
 def test_resume_from_state_file_starts_at_saved_phase(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
@@ -1025,6 +1319,36 @@ phases:
     assert state["entity_cursor"] is None
 
 
+def test_entity_mode_dynamic_destination_continues_from_resolved_state(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    mode: entity
+    states: [new, mid, done]
+    transitions:
+      - from: new
+        to:
+          cmd: "printf '%s\\n' mid >&3"
+      - from: mid
+        to: done
+        cmd: >
+          echo "second-$(basename "$INPUT_ENTITY")" >> {trace_file}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "done" / "a.txt").exists()
+    assert trace_file.read_text(encoding="utf-8").splitlines() == ["second-a.txt"]
+
+
 def test_grouped_numeric_prefix_entities_run_concurrently(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
@@ -1093,6 +1417,37 @@ phases:
     ]
     # Two transition barriers at ~0.2s each, plus process overhead.
     assert elapsed < 0.8
+
+
+def test_parallel_dynamic_selectors_do_not_cross_talk(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    mode: parallel
+    states: [new, left, right]
+    transitions:
+      - from: new
+        to:
+          cmd: >
+            case "$(basename "$INPUT_ENTITY")" in
+              left-*) printf '%s\\n' left >&3 ;;
+              *) printf '%s\\n' right >&3 ;;
+            esac
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    for name in ["left-a.txt", "right-b.txt", "right-c.txt"]:
+        _write(new_dir / name, name)
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "left" / "left-a.txt").exists()
+    assert (tmp_path / "tasks" / "right" / "right-b.txt").exists()
+    assert (tmp_path / "tasks" / "right" / "right-c.txt").exists()
 
 
 def test_watch_mode_reacts_to_new_entities_and_external_moves(tmp_path: Path) -> None:

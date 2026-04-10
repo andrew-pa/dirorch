@@ -10,7 +10,7 @@ from .entities import EntityStore
 from .execution import ExecutionStatusTracker
 from .files import FileStore
 from .locks import EntityLockStore
-from .models import WorkflowConfig
+from .models import NamedTargetConfig, WorkflowConfig
 from .state import RuntimeStateStore
 from .errors import ConflictError, NotFoundError, ValidationError
 
@@ -43,9 +43,11 @@ class WorkflowDefinitionService:
                     "transitions": [
                         {
                             "from": transition.source,
-                            "to": transition.destination,
+                            "to": self._serialize_named_target(transition.destination),
                             "cmd": transition.cmd,
-                            "jump": transition.jump,
+                            "jump": None
+                            if transition.jump_target is None
+                            else self._serialize_named_target(transition.jump_target),
                         }
                         for transition in phase.transitions
                     ],
@@ -64,6 +66,12 @@ class WorkflowDefinitionService:
             else {"cmd": self._config.init.cmd, "stdin": self._config.init.stdin},
             "phases": phases,
         }
+
+    def _serialize_named_target(self, target: NamedTargetConfig) -> str | dict[str, str | None]:
+        if target.constant is not None:
+            return target.constant
+        assert target.hook is not None
+        return {"cmd": target.hook.cmd, "stdin": target.hook.stdin}
 
 
 class EntityAdminService:

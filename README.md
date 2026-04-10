@@ -183,10 +183,10 @@ Phase fields:
 Transition fields:
 
 - `from` (required): source state
-- `to` (required): destination state
+- `to` (required): either a destination state string or a hook object with `cmd` and optional `stdin`
 - `cmd` (optional): shell command to run before move
 - `stdin` (optional): text rendered and piped to the hook process stdin (requires `cmd`)
-- `jump` (optional): target phase name to run to fixpoint after successful transition
+- `jump` (optional): either a target phase string or a hook object with `cmd` and optional `stdin`
 
 Completion hook fields:
 
@@ -308,11 +308,22 @@ Files in state directories are workflow entities.
 Transition processing details:
 
 - Source entities are sorted alphabetically by filename.
-- If transition `cmd` succeeds (or no `cmd`), entity moves `from -> to`.
-- If `cmd` fails, it is retried `retries + 1` total attempts.
-- If still failing, entity moves to `_failed` and no jump occurs for that entity.
+- Transition side-effect `cmd` runs first.
+- Dirorch resolves `to` next:
+  - string `to` uses the configured state directly
+  - object `to` runs a selector command and reads the chosen state name from fd `3`
+- If a destination was selected, Dirorch resolves `jump` after that:
+  - string `jump` uses the configured phase directly
+  - object `jump` runs a selector command and reads the chosen phase name from fd `3`
+- Move happens only after destination and jump validation succeeds.
+- If a selector command writes nothing to fd `3`, the selection is treated as empty:
+  - empty dynamic `to` means no move and no failure
+  - empty dynamic `jump` means move normally and skip the jump
+- Selector stdout/stderr do not affect target selection.
+- If transition `cmd` or a dynamic selector fails after retries, entity moves to `_failed`.
+- Unknown non-empty dynamic state or phase names also move the entity to `_failed`.
 - On successful transition with `jump`, target phase is run to fixpoint, then execution returns to the current phase.
-- `init` and completion hooks use the same retry policy as transition hooks (`retries + 1` attempts total).
+- `init`, completion hooks, transition side-effects, and dynamic selectors all use the same retry policy (`retries + 1` total attempts).
 
 Phase `mode` behavior:
 
@@ -402,10 +413,39 @@ phases:
       - complete
     transitions:
       - from: new
-        to: complete
-        cmd: >
-          ./exec-subtask "$INPUT_ENTITY"
+              to: complete
+              cmd: >
+                ./exec-subtask "$INPUT_ENTITY"
 ```
+
+## Dynamic Targets
+
+`to` and `jump` can also be computed at runtime with hook objects:
+
+```yaml
+phases:
+  tasks:
+    states: [new, review, done]
+    transitions:
+      - from: new
+        cmd: >
+          ./prepare-task "$INPUT_ENTITY"
+        to:
+          cmd: >
+            if grep -q review "$INPUT_ENTITY"; then printf '%s\n' review >&3; else printf '%s\n' done >&3; fi
+        jump:
+          cmd: >
+            if grep -q audit "$INPUT_ENTITY"; then printf '%s\n' audit >&3; fi
+  audit:
+    states: [new, done]
+```
+
+Dynamic selector notes:
+
+- Write the selected state or phase name to fd `3`, for example `printf '%s\n' done >&3`.
+- A fresh anonymous pipe is created for each selector attempt.
+- Dirorch strips surrounding whitespace and uses the first output line from fd `3`.
+- Empty fd `3` output means "no selection".
 
 ## Logging
 

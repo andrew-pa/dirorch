@@ -40,7 +40,7 @@ class NullExecutionObserver:
         phase_name: str,
         phase_mode: str,
         source_state: str,
-        destination_state: str,
+        destination_state: str | None,
         entity_ids: tuple[str, ...],
     ) -> None:
         return None
@@ -49,7 +49,7 @@ class NullExecutionObserver:
         self,
         phase_name: str,
         source_state: str,
-        destination_state: str,
+        destination_state: str | None,
         entity_ids: tuple[str, ...],
     ) -> None:
         return None
@@ -141,7 +141,7 @@ class ExecutionStatusTracker(NullExecutionObserver):
         phase_name: str,
         phase_mode: str,
         source_state: str,
-        destination_state: str,
+        destination_state: str | None,
         entity_ids: tuple[str, ...],
     ) -> None:
         self._activity = ExecutionActivity(
@@ -158,7 +158,7 @@ class ExecutionStatusTracker(NullExecutionObserver):
         self,
         phase_name: str,
         source_state: str,
-        destination_state: str,
+        destination_state: str | None,
         entity_ids: tuple[str, ...],
     ) -> None:
         activity = self._activity

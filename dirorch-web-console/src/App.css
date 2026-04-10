@@ -291,6 +291,29 @@
   color: #ecf9ff;
 }
 
+.state-card__transition-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+
+.state-card__transition-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.4rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(69, 232, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(69, 232, 255, 0.08);
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  line-height: 1;
+  text-align: left;
+  cursor: help;
+}
+
 .state-card__toggle-meta,
 .entity-list__meta,
 .linked-file-list__path,
