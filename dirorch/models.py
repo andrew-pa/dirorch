@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import DEFAULT_WEB_HOST, DEFAULT_WEB_PORT, PHASE_MODE_TRANSITIONS
+from .constants import (
+    DEFAULT_WEB_HOST,
+    DEFAULT_WEB_PORT,
+    PHASE_MODE_TRANSITIONS,
+)
 
 
 @dataclass(frozen=True)

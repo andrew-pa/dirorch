@@ -6,7 +6,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .constants import FAILED_STATE, PHASE_MODE_ENTITY, PHASE_MODE_TRANSITIONS
+from .constants import (
+    FAILED_STATE,
+    PHASE_MODE_ENTITY,
+    PHASE_MODE_PARALLEL,
+    PHASE_MODE_TRANSITIONS,
+)
 from .entities import EntityStore
 from .execution import NullExecutionObserver
 from .errors import WorkflowError
@@ -164,7 +169,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
 
         moved = 0
         jumps: list[str] = []
-        for group in self._entities.group_entities(entities):
+        for group in self._groups_for_entities(entities):
             results = await self._process_group(transition, group)
             for result in results:
                 if result.moved:
@@ -172,6 +177,11 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                     if result.jump is not None:
                         jumps.append(result.jump)
         return moved, jumps
+
+    def _groups_for_entities(self, entities: list[Path]) -> list[Group]:
+        if self.config.mode == PHASE_MODE_PARALLEL:
+            return [Group(tuple(entities), "00")]
+        return self._entities.group_entities(entities)
 
     async def _process_group(
         self,
@@ -329,6 +339,7 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
 
 PHASE_PROCESSOR_FOR_MODE = {
     PHASE_MODE_TRANSITIONS: AllAtOncePhaseProcessor,
+    PHASE_MODE_PARALLEL: AllAtOncePhaseProcessor,
     PHASE_MODE_ENTITY: OneAtATimePhaseProcessor,
 }
 

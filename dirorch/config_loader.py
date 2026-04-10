@@ -5,7 +5,12 @@ from pathlib import Path
 
 import yaml
 
-from .constants import FAILED_STATE, PHASE_MODE_ENTITY, PHASE_MODE_TRANSITIONS
+from .constants import (
+    FAILED_STATE,
+    PHASE_MODE_ENTITY,
+    PHASE_MODE_PARALLEL,
+    PHASE_MODE_TRANSITIONS,
+)
 from .errors import WorkflowError
 from .models import HookConfig, PhaseConfig, TransitionConfig, WorkflowConfig
 
@@ -216,10 +221,16 @@ def _parse_phase_mode(phase_name: str, raw_phase: dict[str, Any]) -> str:
         raise WorkflowError(f"Phase '{phase_name}' field 'mode' must be a string")
 
     mode = raw_mode.strip().lower()
-    if mode not in {PHASE_MODE_TRANSITIONS, PHASE_MODE_ENTITY}:
+    supported_modes = {
+        PHASE_MODE_TRANSITIONS,
+        PHASE_MODE_PARALLEL,
+        PHASE_MODE_ENTITY,
+    }
+    if mode not in supported_modes:
         raise WorkflowError(
             f"Phase '{phase_name}' has invalid mode '{raw_mode}'. "
-            f"Supported modes: '{PHASE_MODE_TRANSITIONS}', '{PHASE_MODE_ENTITY}'"
+            "Supported modes: "
+            f"'{PHASE_MODE_TRANSITIONS}', '{PHASE_MODE_PARALLEL}', '{PHASE_MODE_ENTITY}'"
         )
     return mode
 

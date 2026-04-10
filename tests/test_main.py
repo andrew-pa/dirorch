@@ -165,6 +165,26 @@ def test_load_workflow_rejects_invalid_definitions(
         load_workflow(workflow)
 
 
+def test_load_workflow_accepts_parallel_mode(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    mode: parallel
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+
+    config = load_workflow(workflow)
+
+    assert config.phases[0].mode == "parallel"
+
+
 def test_run_simple_transition_moves_entities_and_stops(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
@@ -1031,6 +1051,48 @@ phases:
 
     # Sequential would be around 0.6s; grouped concurrency should stay under this bound.
     assert elapsed < 0.55
+
+
+def test_parallel_mode_runs_each_transition_for_all_entities_concurrently(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    mode: parallel
+    states: [new, mid, done]
+    transitions:
+      - from: new
+        to: mid
+        cmd: >
+          sleep 0.2; echo "first-$(basename "$INPUT_ENTITY")" >> {trace_file}
+      - from: mid
+        to: done
+        cmd: >
+          sleep 0.2; echo "second-$(basename "$INPUT_ENTITY")" >> {trace_file}
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    for name in ["a.txt", "b.txt", "c.txt"]:
+        _write(new_dir / name, name)
+
+    started = time.monotonic()
+    _run_workflow(workflow, tmp_path)
+    elapsed = time.monotonic() - started
+
+    assert sorted(trace_file.read_text(encoding="utf-8").splitlines()) == [
+        "first-a.txt",
+        "first-b.txt",
+        "first-c.txt",
+        "second-a.txt",
+        "second-b.txt",
+        "second-c.txt",
+    ]
+    # Two transition barriers at ~0.2s each, plus process overhead.
+    assert elapsed < 0.8
 
 
 def test_watch_mode_reacts_to_new_entities_and_external_moves(tmp_path: Path) -> None:

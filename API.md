@@ -301,6 +301,7 @@ Per-phase fields:
 
 - `name: string`
 - `mode: string`
+  Supported values currently include `transitions`, `parallel`, and `entity`.
 - `states: array<string>`
 - `reserved_states: array<string>`
 - `transitions: array<object>`
