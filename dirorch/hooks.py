@@ -50,7 +50,7 @@ class HookRunner:
         self._retries = config.retries
         self._logger = config.logger
         self._entity_log_emitter = config.entity_log_emitter
-        self._stdin_renderer = TemplateRenderer(self._root)
+        self._template_renderer = TemplateRenderer(self._root)
 
     async def run(
         self,
@@ -83,13 +83,39 @@ class HookRunner:
         template_env = self._template_env | extra_env
         last_exit_code: int | None = None
         for attempt in range(1, attempts + 1):
-            await self._emit_command_started(hook, attempt, execution_context)
+            try:
+                rendered_cmd = self._render_cmd(hook, template_env)
+            except TemplateRenderError as exc:
+                last_exit_code = None
+                await self._emit_command_finished(
+                    hook.cmd,
+                    attempt,
+                    execution_context,
+                    exit_code=None,
+                    error=f"cmd template error: {exc}",
+                )
+                self._logger.warning(
+                    "%s failed (attempt %d/%d): cmd template error: %s",
+                    context,
+                    attempt,
+                    attempts,
+                    exc,
+                )
+                if attempt < attempts:
+                    await self._emit_command_retrying(
+                        attempt,
+                        attempts,
+                        execution_context,
+                        reason=f"cmd template error: {exc}",
+                    )
+                continue
+            await self._emit_command_started(rendered_cmd, attempt, execution_context)
             try:
                 stdin_payload = self._render_stdin(hook, template_env)
             except TemplateRenderError as exc:
                 last_exit_code = None
                 await self._emit_command_finished(
-                    hook,
+                    rendered_cmd,
                     attempt,
                     execution_context,
                     exit_code=None,
@@ -111,7 +137,7 @@ class HookRunner:
                     )
                 continue
             result = await self._run_once(
-                hook.cmd,
+                rendered_cmd,
                 stdin_payload,
                 env,
                 capture_selector_output=capture_selector_output,
@@ -120,7 +146,7 @@ class HookRunner:
             )
             last_exit_code = result.exit_code
             await self._emit_command_finished(
-                hook,
+                rendered_cmd,
                 attempt,
                 execution_context,
                 exit_code=result.exit_code,
@@ -152,10 +178,13 @@ class HookRunner:
             attempts_used=attempts,
         )
 
+    def _render_cmd(self, hook: HookConfig, env_vars: dict[str, str]) -> str:
+        return self._template_renderer.render(hook.cmd, env_vars)
+
     def _render_stdin(self, hook: HookConfig, env_vars: dict[str, str]) -> str | None:
         if hook.stdin is None:
             return None
-        return self._stdin_renderer.render(hook.stdin, env_vars)
+        return self._template_renderer.render(hook.stdin, env_vars)
 
     async def _run_once(
         self,
@@ -291,20 +320,20 @@ class HookRunner:
 
     async def _emit_command_started(
         self,
-        hook: HookConfig,
+        command: str,
         attempt: int,
         execution_context: HookExecutionContext | None,
     ) -> None:
         await self._emit_event(
             execution_context,
             kind="command.started",
-            command=hook.cmd,
+            command=command,
             attempt=attempt,
         )
 
     async def _emit_command_finished(
         self,
-        hook: HookConfig,
+        command: str,
         attempt: int,
         execution_context: HookExecutionContext | None,
         *,
@@ -317,7 +346,7 @@ class HookRunner:
         await self._emit_event(
             execution_context,
             kind="command.finished",
-            command=hook.cmd,
+            command=command,
             attempt=attempt,
             returncode=exit_code,
             metadata=metadata,

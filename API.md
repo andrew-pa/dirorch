@@ -341,6 +341,8 @@ Completion/init hook fields:
 - `cmd: string`
 - `stdin: string | null`
 
+Hook `cmd` and `stdin` values are rendered as Jinja2 templates before execution.
+
 Dynamic target semantics:
 
 - Transition side-effect `cmd` runs before dynamic `to` or dynamic `jump` selectors.

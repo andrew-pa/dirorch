@@ -255,15 +255,16 @@ Workflow `env` template context includes:
 
 Workflow `env` templates do not include `INPUT_ENTITY`.
 
-Workflow and stdin templates can also use standard Jinja `{% include %}` and `{% import %}` statements for template files under `--root`.
+Workflow env templates and hook `cmd`/`stdin` templates can also use standard Jinja `{% include %}` and `{% import %}` statements for template files under `--root`.
 
 - template names are resolved relative to `--root`
 - Jinja auto-reload is enabled, so updated fragment files are picked up on later renders
 - example: `{% include "templates/common-prompt.j2" %}`
 
-## Stdin Templates
+## Hook Templates
 
-If a hook defines `stdin`, Dirorch renders it with Jinja2 before piping it into the command.
+If a hook defines `cmd` or `stdin`, Dirorch renders it with Jinja2 before running the command.
+This applies to transition side-effect hooks, completion hooks, init hooks, and dynamic `to`/`jump` selector hooks.
 
 Template context includes only Dirorch-defined variables:
 
@@ -460,6 +461,7 @@ phases:
 Dynamic selector notes:
 
 - Write the selected state or phase name to fd `3`, for example `printf '%s\n' done >&3`.
+- Selector `cmd` and `stdin` fields are rendered with the same Jinja2 template context as other hooks.
 - A fresh anonymous pipe is created for each selector attempt.
 - Dirorch strips surrounding whitespace and uses the first output line from fd `3`.
 - Empty fd `3` output means "no selection".

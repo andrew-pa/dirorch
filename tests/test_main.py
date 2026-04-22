@@ -624,6 +624,40 @@ phases:
     assert rendered[2] == "payload=from-file"
 
 
+def test_transition_hook_cmd_template_renders_vars_and_file(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    include_path = tmp_path / "payload.txt"
+    observed = tmp_path / "rendered.txt"
+    _write(include_path, "from-file\n")
+    _write(
+        workflow,
+        f"""
+env:
+  GREETING: hello
+  FILE_TO_INCLUDE: "{include_path}"
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          printf '%s\\n%s\\n%s\\n' "{{{{ GREETING }}}}" "{{{{ INPUT_ENTITY }}}}" "{{{{ include_file(FILE_TO_INCLUDE).strip() }}}}" > "{observed}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    entity = new_dir / "x.txt"
+    _write(entity, "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    rendered = observed.read_text(encoding="utf-8").splitlines()
+    assert rendered[0] == "hello"
+    assert rendered[1] == str(entity.resolve())
+    assert rendered[2] == "from-file"
+
+
 def test_transition_hook_stdin_template_can_read_input_entity_json(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     observed = tmp_path / "rendered.txt"
@@ -751,6 +785,32 @@ phases:
     _run_workflow(workflow, tmp_path)
 
     assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+
+
+def test_dynamic_destination_cmd_template_can_read_input_entity_json(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, review, done]
+    transitions:
+      - from: new
+        to:
+          cmd: >
+            printf '%s\\n' "{{ read_json(INPUT_ENTITY).next_state }}" >&3
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.json", '{"next_state":"review"}')
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / "review" / "item.json").exists()
 
 
 def test_dynamic_destination_uses_fd_three_not_stdout(tmp_path: Path) -> None:
