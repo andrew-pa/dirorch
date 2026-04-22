@@ -329,12 +329,12 @@ Transition processing details:
 - Transition side-effect `cmd` runs first.
 - Dirorch resolves `to` next:
   - string `to` uses the configured state directly
-  - object `to` runs a selector command and reads the chosen state name from fd `3`
+  - object `to` runs a selector command and reads the chosen state name from the temporary pipe named by `DIRORCH_SELECTOR_PIPE`
 - If a destination was selected, Dirorch resolves `jump` after that:
   - string `jump` uses the configured phase directly
-  - object `jump` runs a selector command and reads the chosen phase name from fd `3`
+  - object `jump` runs a selector command and reads the chosen phase name from the temporary pipe named by `DIRORCH_SELECTOR_PIPE`
 - Move happens only after destination and jump validation succeeds.
-- If a selector command writes nothing to fd `3`, the selection is treated as empty:
+- If a selector command writes nothing to `DIRORCH_SELECTOR_PIPE`, the selection is treated as empty:
   - empty dynamic `to` means no move and no failure
   - empty dynamic `jump` means move normally and skip the jump
 - Selector stdout/stderr do not affect target selection.
@@ -450,21 +450,21 @@ phases:
           ./prepare-task "$INPUT_ENTITY"
         to:
           cmd: >
-            if grep -q review "$INPUT_ENTITY"; then printf '%s\n' review >&3; else printf '%s\n' done >&3; fi
+            if grep -q review "$INPUT_ENTITY"; then printf '%s\n' review > "$DIRORCH_SELECTOR_PIPE"; else printf '%s\n' done > "$DIRORCH_SELECTOR_PIPE"; fi
         jump:
           cmd: >
-            if grep -q audit "$INPUT_ENTITY"; then printf '%s\n' audit >&3; fi
+            if grep -q audit "$INPUT_ENTITY"; then printf '%s\n' audit > "$DIRORCH_SELECTOR_PIPE"; fi
   audit:
     states: [new, done]
 ```
 
 Dynamic selector notes:
 
-- Write the selected state or phase name to fd `3`, for example `printf '%s\n' done >&3`.
-- Selector `cmd` and `stdin` fields are rendered with the same Jinja2 template context as other hooks.
-- A fresh anonymous pipe is created for each selector attempt.
-- Dirorch strips surrounding whitespace and uses the first output line from fd `3`.
-- Empty fd `3` output means "no selection".
+- Write the selected state or phase name to the path in `DIRORCH_SELECTOR_PIPE`, for example `printf '%s\n' done > "$DIRORCH_SELECTOR_PIPE"`.
+- Selector `cmd` and `stdin` fields are rendered with the same Jinja2 template context as other hooks, including `DIRORCH_SELECTOR_PIPE` and `env.DIRORCH_SELECTOR_PIPE`.
+- A fresh temporary named pipe is created for each selector attempt and cleaned up after the attempt finishes.
+- Dirorch strips surrounding whitespace and uses the first output line from `DIRORCH_SELECTOR_PIPE`.
+- Empty pipe output means "no selection".
 
 ## Logging
 

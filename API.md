@@ -346,7 +346,7 @@ Hook `cmd` and `stdin` values are rendered as Jinja2 templates before execution.
 Dynamic target semantics:
 
 - Transition side-effect `cmd` runs before dynamic `to` or dynamic `jump` selectors.
-- Selector commands must write the chosen state or phase name to fd `3`.
+- Selector commands must write the chosen state or phase name to the temporary pipe path in `DIRORCH_SELECTOR_PIPE`.
 - Empty dynamic `to` output means no move; empty dynamic `jump` output means no jump.
 
 Errors:

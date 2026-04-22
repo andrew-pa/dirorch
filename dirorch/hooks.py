@@ -4,9 +4,12 @@ import asyncio
 import codecs
 import logging
 import os
+import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from .constants import SELECTOR_PIPE_ENV_VAR
 from .entity_logging import EntityLogEvent, EntityLogEmitter, NullEntityLogEmitter, utc_now
 from .models import HookConfig
 from .template_engine import TemplateRenderError, TemplateRenderer
@@ -38,6 +41,13 @@ class CommandResult:
     exit_code: int | None = None
     selector_output: str | None = None
     attempts_used: int = 0
+
+
+@dataclass(frozen=True)
+class SelectorPipe:
+    path: Path
+    read_fd: int
+    temp_dir: Path
 
 
 class HookRunner:
@@ -79,99 +89,113 @@ class HookRunner:
         execution_context: HookExecutionContext | None = None,
     ) -> CommandResult:
         attempts = self._retries + 1
-        env = self._base_env | extra_env
-        template_env = self._template_env | extra_env
+        base_env = self._base_env | extra_env
+        base_template_env = self._template_env | extra_env
         last_exit_code: int | None = None
         for attempt in range(1, attempts + 1):
+            selector_pipe = (
+                self._create_selector_pipe() if capture_selector_output else None
+            )
             try:
-                rendered_cmd = self._render_cmd(hook, template_env)
-            except TemplateRenderError as exc:
-                last_exit_code = None
-                await self._emit_command_finished(
-                    hook.cmd,
-                    attempt,
-                    execution_context,
-                    exit_code=None,
-                    error=f"cmd template error: {exc}",
+                selector_env = (
+                    {SELECTOR_PIPE_ENV_VAR: str(selector_pipe.path)}
+                    if selector_pipe is not None
+                    else {}
                 )
-                self._logger.warning(
-                    "%s failed (attempt %d/%d): cmd template error: %s",
-                    context,
-                    attempt,
-                    attempts,
-                    exc,
-                )
-                if attempt < attempts:
-                    await self._emit_command_retrying(
+                env = base_env | selector_env
+                template_env = base_template_env | selector_env
+                try:
+                    rendered_cmd = self._render_cmd(hook, template_env)
+                except TemplateRenderError as exc:
+                    last_exit_code = None
+                    await self._emit_command_finished(
+                        hook.cmd,
+                        attempt,
+                        execution_context,
+                        exit_code=None,
+                        error=f"cmd template error: {exc}",
+                    )
+                    self._logger.warning(
+                        "%s failed (attempt %d/%d): cmd template error: %s",
+                        context,
                         attempt,
                         attempts,
-                        execution_context,
-                        reason=f"cmd template error: {exc}",
+                        exc,
                     )
-                continue
-            await self._emit_command_started(rendered_cmd, attempt, execution_context)
-            try:
-                stdin_payload = self._render_stdin(hook, template_env)
-            except TemplateRenderError as exc:
-                last_exit_code = None
+                    if attempt < attempts:
+                        await self._emit_command_retrying(
+                            attempt,
+                            attempts,
+                            execution_context,
+                            reason=f"cmd template error: {exc}",
+                        )
+                    continue
+                await self._emit_command_started(rendered_cmd, attempt, execution_context)
+                try:
+                    stdin_payload = self._render_stdin(hook, template_env)
+                except TemplateRenderError as exc:
+                    last_exit_code = None
+                    await self._emit_command_finished(
+                        rendered_cmd,
+                        attempt,
+                        execution_context,
+                        exit_code=None,
+                        error=f"stdin template error: {exc}",
+                    )
+                    self._logger.warning(
+                        "%s failed (attempt %d/%d): stdin template error: %s",
+                        context,
+                        attempt,
+                        attempts,
+                        exc,
+                    )
+                    if attempt < attempts:
+                        await self._emit_command_retrying(
+                            attempt,
+                            attempts,
+                            execution_context,
+                            reason=f"stdin template error: {exc}",
+                        )
+                    continue
+                result = await self._run_once(
+                    rendered_cmd,
+                    stdin_payload,
+                    env,
+                    selector_pipe=selector_pipe,
+                    attempt=attempt,
+                    execution_context=execution_context,
+                )
+                last_exit_code = result.exit_code
                 await self._emit_command_finished(
                     rendered_cmd,
                     attempt,
                     execution_context,
-                    exit_code=None,
-                    error=f"stdin template error: {exc}",
+                    exit_code=result.exit_code,
                 )
+                if result.succeeded:
+                    return CommandResult(
+                        succeeded=True,
+                        exit_code=result.exit_code,
+                        selector_output=result.selector_output,
+                        attempts_used=attempt,
+                    )
                 self._logger.warning(
-                    "%s failed (attempt %d/%d): stdin template error: %s",
+                    "%s failed (attempt %d/%d, exit=%s)",
                     context,
                     attempt,
                     attempts,
-                    exc,
+                    result.exit_code,
                 )
                 if attempt < attempts:
                     await self._emit_command_retrying(
                         attempt,
                         attempts,
                         execution_context,
-                        reason=f"stdin template error: {exc}",
+                        reason=f"exit={result.exit_code}",
                     )
-                continue
-            result = await self._run_once(
-                rendered_cmd,
-                stdin_payload,
-                env,
-                capture_selector_output=capture_selector_output,
-                attempt=attempt,
-                execution_context=execution_context,
-            )
-            last_exit_code = result.exit_code
-            await self._emit_command_finished(
-                rendered_cmd,
-                attempt,
-                execution_context,
-                exit_code=result.exit_code,
-            )
-            if result.succeeded:
-                return CommandResult(
-                    succeeded=True,
-                    exit_code=result.exit_code,
-                    selector_output=result.selector_output,
-                    attempts_used=attempt,
-                )
-            self._logger.warning(
-                "%s failed (attempt %d/%d, exit=%s)",
-                context,
-                attempt,
-                attempts,
-                result.exit_code,
-            )
-            if attempt < attempts:
-                await self._emit_command_retrying(
-                    attempt,
-                    attempts,
-                    execution_context,
-                    reason=f"exit={result.exit_code}",
-                )
+            finally:
+                if selector_pipe is not None:
+                    self._cleanup_selector_pipe(selector_pipe)
         return CommandResult(
             succeeded=False,
             exit_code=last_exit_code,
@@ -192,75 +216,64 @@ class HookRunner:
         stdin_payload: str | None,
         env: dict[str, str],
         *,
-        capture_selector_output: bool,
+        selector_pipe: SelectorPipe | None,
         attempt: int,
         execution_context: HookExecutionContext | None,
     ) -> CommandResult:
-        pipe_read, pipe_write = os.pipe()
+        process = await asyncio.create_subprocess_shell(
+            cmd,
+            cwd=str(self._root),
+            env=env,
+            stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        assert process.stdout is not None
+        assert process.stderr is not None
+
+        stdout_task = asyncio.create_task(
+            self._drain_stream(
+                process.stdout,
+                "stdout",
+                cmd,
+                attempt,
+                execution_context,
+            )
+        )
+        stderr_task = asyncio.create_task(
+            self._drain_stream(
+                process.stderr,
+                "stderr",
+                cmd,
+                attempt,
+                execution_context,
+            )
+        )
+        stdin_task = asyncio.create_task(self._write_stdin(process, stdin_payload))
+
         try:
-            wrapped_cmd = (
-                self._wrap_selector_command(cmd, pipe_write)
-                if capture_selector_output
-                else cmd
-            )
-            process = await asyncio.create_subprocess_shell(
-                wrapped_cmd,
-                cwd=str(self._root),
-                env=env,
-                stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                pass_fds=(pipe_write,),
-            )
-            os.close(pipe_write)
-            pipe_write = -1
-
-            assert process.stdout is not None
-            assert process.stderr is not None
-
-            stdout_task = asyncio.create_task(
-                self._drain_stream(
-                    process.stdout,
-                    "stdout",
-                    cmd,
-                    attempt,
-                    execution_context,
-                )
-            )
-            stderr_task = asyncio.create_task(
-                self._drain_stream(
-                    process.stderr,
-                    "stderr",
-                    cmd,
-                    attempt,
-                    execution_context,
-                )
-            )
-            stdin_task = asyncio.create_task(self._write_stdin(process, stdin_payload))
-
-            try:
-                await process.wait()
-                await stdin_task
-                await asyncio.gather(stdout_task, stderr_task)
-            finally:
-                for task in (stdin_task, stdout_task, stderr_task):
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(stdin_task, stdout_task, stderr_task, return_exceptions=True)
-
-            selector_output = None
-            if capture_selector_output:
-                selector_output = await asyncio.to_thread(self._read_selector_output, pipe_read)
-            return CommandResult(
-                succeeded=process.returncode == 0,
-                exit_code=process.returncode,
-                selector_output=selector_output,
-                attempts_used=attempt,
-            )
+            await process.wait()
+            await stdin_task
+            await asyncio.gather(stdout_task, stderr_task)
         finally:
-            if pipe_write >= 0:
-                os.close(pipe_write)
-            os.close(pipe_read)
+            for task in (stdin_task, stdout_task, stderr_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(stdin_task, stdout_task, stderr_task, return_exceptions=True)
+
+        selector_output = None
+        if selector_pipe is not None:
+            selector_output = await asyncio.to_thread(
+                self._read_selector_output,
+                selector_pipe.read_fd,
+            )
+        return CommandResult(
+            succeeded=process.returncode == 0,
+            exit_code=process.returncode,
+            selector_output=selector_output,
+            attempts_used=attempt,
+        )
 
     async def _write_stdin(
         self,
@@ -307,10 +320,23 @@ class HookRunner:
                     text,
                 )
 
-    def _wrap_selector_command(self, cmd: str, selector_fd: int) -> str:
-        return f"exec 3>&{selector_fd}; exec {selector_fd}>&-; {cmd}"
+    def _create_selector_pipe(self) -> SelectorPipe:
+        temp_dir = Path(tempfile.mkdtemp(prefix="dirorch-selector-"))
+        pipe_path = temp_dir / "signal.pipe"
+        os.mkfifo(pipe_path, 0o600)
+        read_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+        return SelectorPipe(path=pipe_path, read_fd=read_fd, temp_dir=temp_dir)
+
+    def _cleanup_selector_pipe(self, selector_pipe: SelectorPipe) -> None:
+        with suppress(OSError):
+            os.close(selector_pipe.read_fd)
+        with suppress(FileNotFoundError):
+            selector_pipe.path.unlink()
+        with suppress(OSError):
+            selector_pipe.temp_dir.rmdir()
 
     def _read_selector_output(self, pipe_read: int) -> str:
+        os.set_blocking(pipe_read, True)
         with os.fdopen(pipe_read, "rb", closefd=False) as stream:
             raw = stream.read()
         output = raw.decode("utf-8").strip()

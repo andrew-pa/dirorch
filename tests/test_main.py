@@ -96,10 +96,10 @@ phases:
     transitions:
       - from: new
         to:
-          cmd: "printf '%s\\n' review >&3"
+          cmd: "printf '%s\\n' review > \\\"$DIRORCH_SELECTOR_PIPE\\\""
           stdin: "{{ INPUT_ENTITY }}"
         jump:
-          cmd: "printf '%s\\n' audit >&3"
+          cmd: "printf '%s\\n' audit > \\\"$DIRORCH_SELECTOR_PIPE\\\""
   audit:
     states: [new, done]
 """,
@@ -110,11 +110,11 @@ phases:
 
     assert transition.destination.constant is None
     assert transition.destination.hook is not None
-    assert transition.destination.hook.cmd == "printf '%s\n' review >&3"
+    assert transition.destination.hook.cmd == "printf '%s\n' review > \"$DIRORCH_SELECTOR_PIPE\""
     assert transition.destination.hook.stdin == "{{ INPUT_ENTITY }}"
     assert transition.jump_target is not None
     assert transition.jump_target.hook is not None
-    assert transition.jump_target.hook.cmd == "printf '%s\n' audit >&3"
+    assert transition.jump_target.hook.cmd == "printf '%s\n' audit > \"$DIRORCH_SELECTOR_PIPE\""
 
 
 @pytest.mark.parametrize(
@@ -773,7 +773,7 @@ phases:
           printf '%s' ready > "{marker}"
         to:
           cmd: >
-            if [ "$(cat "{marker}")" = "ready" ]; then printf '%s\\n' review >&3; else exit 7; fi
+            if [ "$(cat "{marker}")" = "ready" ]; then printf '%s\\n' review > "$DIRORCH_SELECTOR_PIPE"; else exit 7; fi
       - from: review
         to: done
 """,
@@ -801,7 +801,7 @@ phases:
       - from: new
         to:
           cmd: >
-            printf '%s\\n' "{{ read_json(INPUT_ENTITY).next_state }}" >&3
+            printf '%s\\n' "{{ read_json(INPUT_ENTITY).next_state }}" > "$DIRORCH_SELECTOR_PIPE"
 """,
     )
     new_dir = tmp_path / "tasks" / "new"
@@ -813,7 +813,7 @@ phases:
     assert (tmp_path / "tasks" / "review" / "item.json").exists()
 
 
-def test_dynamic_destination_uses_fd_three_not_stdout(tmp_path: Path) -> None:
+def test_dynamic_destination_uses_selector_pipe_not_stdout(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
         workflow,
@@ -826,7 +826,7 @@ phases:
         to:
           cmd: >
             printf '%s\\n' ignored;
-            printf '%s\\n' done >&3;
+            printf '%s\\n' done > "$DIRORCH_SELECTOR_PIPE";
             printf '%s\\n' ignored >&2
 """,
     )
@@ -837,6 +837,38 @@ phases:
     _run_workflow(workflow, tmp_path)
 
     assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+
+
+def test_dynamic_destination_selector_pipe_is_in_env_and_templates_and_cleaned_up(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    observed = tmp_path / "selector-pipe.txt"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, review]
+    transitions:
+      - from: new
+        to:
+          cmd: >
+            printf '%s\\n' "{{{{ DIRORCH_SELECTOR_PIPE }}}}" > "{observed}";
+            printf '%s\\n' review > "$DIRORCH_SELECTOR_PIPE"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    selector_pipe = Path(observed.read_text(encoding="utf-8").strip())
+
+    assert (tmp_path / "tasks" / "review" / "item.txt").exists()
+    assert not selector_pipe.exists()
+    assert not selector_pipe.parent.exists()
 
 
 def test_dynamic_destination_empty_output_leaves_entity_in_place(tmp_path: Path) -> None:
@@ -875,7 +907,7 @@ phases:
     transitions:
       - from: new
         to:
-          cmd: "printf '%s\\n' nowhere >&3"
+          cmd: 'printf ''%s\n'' nowhere > "$DIRORCH_SELECTOR_PIPE"'
 """,
     )
     new_dir = tmp_path / "tasks" / "new"
@@ -901,7 +933,7 @@ phases:
       - from: new
         to:
           cmd: >
-            if [ -f "{marker}" ]; then printf '%s\\n' done >&3; else touch "{marker}"; exit 9; fi
+            if [ -f "{marker}" ]; then printf '%s\\n' done > "$DIRORCH_SELECTOR_PIPE"; else touch "{marker}"; exit 9; fi
 """,
     )
     new_dir = tmp_path / "tasks" / "new"
@@ -1122,7 +1154,7 @@ phases:
         cmd: >
           cp "$INPUT_ENTITY" "$DIR_SUBTASKS_NEW/sub-$(basename "$INPUT_ENTITY")"
         jump:
-          cmd: "printf '%s\\n' subtasks >&3"
+          cmd: 'printf ''%s\n'' subtasks > "$DIRORCH_SELECTOR_PIPE"'
   subtasks:
     states: [new, complete]
     transitions:
@@ -1193,7 +1225,7 @@ phases:
       - from: new
         to: done
         jump:
-          cmd: "printf '%s\\n' nowhere >&3"
+          cmd: 'printf ''%s\n'' nowhere > "$DIRORCH_SELECTOR_PIPE"'
 """,
     )
     new_dir = tmp_path / "tasks" / "new"
@@ -1392,7 +1424,7 @@ phases:
     transitions:
       - from: new
         to:
-          cmd: "printf '%s\\n' mid >&3"
+          cmd: 'printf ''%s\n'' mid > "$DIRORCH_SELECTOR_PIPE"'
       - from: mid
         to: done
         cmd: >
@@ -1493,8 +1525,8 @@ phases:
         to:
           cmd: >
             case "$(basename "$INPUT_ENTITY")" in
-              left-*) printf '%s\\n' left >&3 ;;
-              *) printf '%s\\n' right >&3 ;;
+              left-*) printf '%s\\n' left > "$DIRORCH_SELECTOR_PIPE" ;;
+              *) printf '%s\\n' right > "$DIRORCH_SELECTOR_PIPE" ;;
             esac
 """,
     )
@@ -1757,7 +1789,7 @@ phases:
         to:
           cmd: >
             printf 'selector-output\\n';
-            printf 'review\\n' >&3
+            printf 'review\\n' > "$DIRORCH_SELECTOR_PIPE"
 """,
     )
     new_dir = tmp_path / "tasks" / "new"
