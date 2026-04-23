@@ -813,6 +813,39 @@ phases:
     assert (tmp_path / "tasks" / "review" / "item.json").exists()
 
 
+def test_dynamic_destination_can_move_to_other_phase_and_state(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: "printf '%s\\n' review/queued > \\\"$DIRORCH_SELECTOR_PIPE\\\""
+  review:
+    states: [queued, done]
+    transitions:
+      - from: queued
+        to: done
+        cmd: >
+          echo "review-$(basename "$INPUT_ENTITY")" >> "{trace_file}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert not (tmp_path / "tasks" / "new" / "item.txt").exists()
+    assert (tmp_path / "review" / "done" / "item.txt").exists()
+    assert trace_file.read_text(encoding="utf-8").splitlines() == ["review-item.txt"]
+
+
 def test_dynamic_destination_uses_selector_pipe_not_stdout(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
@@ -917,6 +950,34 @@ phases:
     _run_workflow(workflow, tmp_path)
 
     assert (tmp_path / "tasks" / FAILED_STATE / "item.txt").exists()
+
+
+def test_dynamic_destination_invalid_phase_state_output_moves_to_failed(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: 'printf ''%s\n'' review/missing > "$DIRORCH_SELECTOR_PIPE"'
+  review:
+    states: [queued, done]
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "tasks" / FAILED_STATE / "item.txt").exists()
+    assert not (tmp_path / "review" / "queued" / "item.txt").exists()
 
 
 def test_dynamic_destination_retries_then_succeeds(tmp_path: Path) -> None:
@@ -1439,6 +1500,45 @@ phases:
 
     assert (tmp_path / "tasks" / "done" / "a.txt").exists()
     assert trace_file.read_text(encoding="utf-8").splitlines() == ["second-a.txt"]
+
+
+def test_entity_mode_dynamic_destination_can_move_to_other_phase_and_state(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    trace_file = tmp_path / "trace.log"
+    _write(
+        workflow,
+        f"""
+phases:
+  tasks:
+    mode: entity
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: 'printf ''%s\n'' review/queued > "$DIRORCH_SELECTOR_PIPE"'
+      - from: done
+        to: done
+        cmd: >
+          echo "unexpected-task-transition" >> "{trace_file}"
+  review:
+    states: [queued, done]
+    transitions:
+      - from: queued
+        to: done
+        cmd: >
+          echo "review-$(basename "$INPUT_ENTITY")" >> "{trace_file}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "a.txt", "a")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert (tmp_path / "review" / "done" / "a.txt").exists()
+    assert trace_file.read_text(encoding="utf-8").splitlines() == ["review-a.txt"]
 
 
 def test_grouped_numeric_prefix_entities_run_concurrently(tmp_path: Path) -> None:

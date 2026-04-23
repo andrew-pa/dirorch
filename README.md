@@ -329,7 +329,7 @@ Transition processing details:
 - Transition side-effect `cmd` runs first.
 - Dirorch resolves `to` next:
   - string `to` uses the configured state directly
-  - object `to` runs a selector command and reads the chosen state name from the temporary pipe named by `DIRORCH_SELECTOR_PIPE`
+  - object `to` runs a selector command and reads either a state name or a `<phase>/<state>` target from the temporary pipe named by `DIRORCH_SELECTOR_PIPE`
 - If a destination was selected, Dirorch resolves `jump` after that:
   - string `jump` uses the configured phase directly
   - object `jump` runs a selector command and reads the chosen phase name from the temporary pipe named by `DIRORCH_SELECTOR_PIPE`
@@ -339,7 +339,7 @@ Transition processing details:
   - empty dynamic `jump` means move normally and skip the jump
 - Selector stdout/stderr do not affect target selection.
 - If transition `cmd` or a dynamic selector fails after retries, entity moves to `_failed`.
-- Unknown non-empty dynamic state or phase names also move the entity to `_failed`.
+- Unknown non-empty dynamic state, phase, or `<phase>/<state>` names also move the entity to `_failed`.
 - On successful transition with `jump`, target phase is run to fixpoint, then execution returns to the current phase.
 - `init`, completion hooks, transition side-effects, and dynamic selectors all use the same retry policy (`retries + 1` total attempts).
 
@@ -460,7 +460,7 @@ phases:
 
 Dynamic selector notes:
 
-- Write the selected state or phase name to the path in `DIRORCH_SELECTOR_PIPE`, for example `printf '%s\n' done > "$DIRORCH_SELECTOR_PIPE"`.
+- Write the selected state, phase, or `<phase>/<state>` name to the path in `DIRORCH_SELECTOR_PIPE`, for example `printf '%s\n' done > "$DIRORCH_SELECTOR_PIPE"` or `printf '%s\n' review/queued > "$DIRORCH_SELECTOR_PIPE"`.
 - Selector `cmd` and `stdin` fields are rendered with the same Jinja2 template context as other hooks, including `DIRORCH_SELECTOR_PIPE` and `env.DIRORCH_SELECTOR_PIPE`.
 - A fresh temporary named pipe is created for each selector attempt and cleaned up after the attempt finishes.
 - Dirorch strips surrounding whitespace and uses the first output line from `DIRORCH_SELECTOR_PIPE`.

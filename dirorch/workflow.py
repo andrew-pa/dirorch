@@ -110,6 +110,7 @@ class PhaseProcessor:
             return TransitionResult(
                 moved=False,
                 failed=False,
+                destination_phase=None,
                 destination_state=None,
                 jump_phase=None,
             )
@@ -133,7 +134,7 @@ class PhaseProcessor:
             return await self._handle_transition_failure(transition, entity)
 
         try:
-            destination_state = await self._resolve_transition_destination(
+            destination = await self._resolve_transition_destination(
                 transition,
                 entity,
                 extra_env,
@@ -145,10 +146,11 @@ class PhaseProcessor:
                 entity,
                 reason=str(exc),
             )
-        if destination_state is None:
+        if destination is None:
             return TransitionResult(
                 moved=False,
                 failed=False,
+                destination_phase=None,
                 destination_state=None,
                 jump_phase=None,
             )
@@ -166,12 +168,6 @@ class PhaseProcessor:
                 entity,
                 reason=str(exc),
             )
-        if destination_state not in self.config.states:
-            return await self._handle_transition_failure(
-                transition,
-                entity,
-                reason=f"selected invalid destination state '{destination_state}'",
-            )
         if jump_phase is not None and jump_phase not in self._phase_names:
             return await self._handle_transition_failure(
                 transition,
@@ -182,7 +178,8 @@ class PhaseProcessor:
         return await self._apply_successful_transition(
             transition,
             entity,
-            destination_state,
+            destination.phase_name,
+            destination.state_name,
             jump_phase,
         )
 
@@ -225,8 +222,8 @@ class PhaseProcessor:
         entity: Path,
         extra_env: dict[str, str],
         context: str,
-    ) -> str | None:
-        return await self._resolve_named_target(
+    ) -> ResolvedDestination | None:
+        resolved = await self._resolve_named_target(
             transition.destination,
             entity,
             transition,
@@ -234,6 +231,9 @@ class PhaseProcessor:
             f"{context} destination selector",
             selector_kind="destination",
         )
+        if resolved is None:
+            return None
+        return self._parse_destination_selection(resolved)
 
     async def _resolve_transition_jump(
         self,
@@ -345,6 +345,7 @@ class PhaseProcessor:
         return TransitionResult(
             moved=False,
             failed=True,
+            destination_phase=None,
             destination_state=None,
             jump_phase=None,
         )
@@ -353,15 +354,17 @@ class PhaseProcessor:
         self,
         transition: TransitionConfig,
         entity: Path,
+        destination_phase: str,
         destination_state: str,
         jump_phase: str | None,
     ) -> TransitionResult:
-        await self._entities.move_to_state(self.config.name, destination_state, entity)
+        await self._entities.move_to_state(destination_phase, destination_state, entity)
         await self._emit_entity_event(
             entity.name,
             kind="transition.moved",
             source_state=transition.source,
             destination_state=destination_state,
+            metadata={"destination_phase": destination_phase},
         )
         if jump_phase is not None:
             await self._emit_entity_event(
@@ -374,15 +377,39 @@ class PhaseProcessor:
         self._logger.info(
             "Moved entity '%s' to %s/%s",
             entity.name,
-            self.config.name,
+            destination_phase,
             destination_state,
         )
         return TransitionResult(
             moved=True,
             failed=False,
+            destination_phase=destination_phase,
             destination_state=destination_state,
             jump_phase=jump_phase,
         )
+
+    def _parse_destination_selection(self, selection: str) -> "ResolvedDestination":
+        if selection in self.config.states:
+            return ResolvedDestination(
+                phase_name=self.config.name,
+                state_name=selection,
+            )
+
+        phase_name, separator, state_name = selection.partition("/")
+        if (
+            separator
+            and phase_name
+            and state_name
+            and self._entities.is_valid_state(phase_name, state_name)
+        ):
+            return ResolvedDestination(
+                phase_name=phase_name,
+                state_name=state_name,
+            )
+
+        if separator:
+            raise WorkflowError(f"selected invalid destination '{selection}'")
+        raise WorkflowError(f"selected invalid destination state '{selection}'")
 
     def _configured_destination_state(
         self,
@@ -619,9 +646,15 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
                 return moved
 
             moved += 1
+            assert result.destination_phase is not None
             assert result.destination_state is not None
+            if result.destination_phase != self.config.name:
+                self._clear_entity_cursor()
+                if result.jump_phase is not None:
+                    await self._jump_handler(result.jump_phase, self.config.name)
+                return moved
             current = (
-                self._entities.dir_for(self.config.name, result.destination_state)
+                self._entities.dir_for(result.destination_phase, result.destination_state)
                 / current.name
             )
             if result.jump_phase is not None:
@@ -889,3 +922,9 @@ def _find_transition_from_state(
         if transition.source == state_name:
             return transition
     return None
+
+
+@dataclass(frozen=True)
+class ResolvedDestination:
+    phase_name: str
+    state_name: str

@@ -147,7 +147,10 @@ class EntityTranscriptFormatter:
                 return f'transition failed reason="{reason}"'
             return "transition failed"
         if event.kind == "transition.moved":
-            return f"moved to {event.phase}/{event.destination_state}"
+            destination_phase = event.metadata.get("destination_phase")
+            if not isinstance(destination_phase, str) or not destination_phase:
+                destination_phase = event.phase
+            return f"moved to {destination_phase}/{event.destination_state}"
         if event.kind == "transition.jump":
             return f"jumping to phase {_metadata_text(event.metadata, 'target_phase')}"
         return None
