@@ -84,6 +84,7 @@ class CliOptions:
 class TransitionResult:
     moved: bool
     failed: bool
+    paused: bool
     destination_phase: str | None
     destination_state: str | None
     jump_phase: str | None

@@ -106,6 +106,10 @@ class EntityTranscriptFormatter:
             return "entity locked"
         if event.kind == "entity.unlocked":
             return "entity unlocked"
+        if event.kind == "entity.paused":
+            return "entity paused"
+        if event.kind == "entity.resumed":
+            return "entity resumed"
         if event.kind == "entity.deleted":
             return "entity deleted"
         if event.kind == "entity.moved":
@@ -130,6 +134,8 @@ class EntityTranscriptFormatter:
             return self._format_command_finished(event)
         if event.kind == "command.retrying":
             return self._format_command_retrying(event)
+        if event.kind == "command.terminated":
+            return self._format_command_terminated(event)
         if event.kind == "selector.resolved":
             selector_kind = _metadata_text(event.metadata, "selector_kind")
             value = _metadata_text(event.metadata, "selected")
@@ -146,6 +152,8 @@ class EntityTranscriptFormatter:
             if isinstance(reason, str) and reason:
                 return f'transition failed reason="{reason}"'
             return "transition failed"
+        if event.kind == "transition.paused":
+            return "transition paused"
         if event.kind == "transition.moved":
             destination_phase = event.metadata.get("destination_phase")
             if not isinstance(destination_phase, str) or not destination_phase:
@@ -187,6 +195,18 @@ class EntityTranscriptFormatter:
         reason = event.metadata.get("reason")
         if isinstance(reason, str) and reason:
             parts.append(f'reason="{reason}"')
+        return " ".join(parts)
+
+    def _format_command_terminated(self, event: EntityLogEvent) -> str:
+        prefix = self._command_prefix(event)
+        parts = [f"{prefix} terminated"]
+        reason = event.metadata.get("reason")
+        if isinstance(reason, str) and reason:
+            parts.append(f'reason="{reason}"')
+        if event.attempt is not None:
+            parts.append(f"attempt={event.attempt}")
+        if event.command is not None:
+            parts.append(f'cmd="{event.command}"')
         return " ".join(parts)
 
     def _command_prefix(self, event: EntityLogEvent) -> str:

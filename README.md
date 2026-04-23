@@ -146,14 +146,15 @@ dirorch ./workflow.yaml --root ./work --web --web-log --web-host 0.0.0.0 --web-p
 Available endpoints:
 
 - `GET /workflow`: workflow structure, phase order, states, transitions, and configured hooks
-- `GET /status/workflow`: persisted runtime snapshot, entity counts, locks, and current execution activity
-- `GET /status/entities`: entity list with phase/state, lock state, and processing flag
+- `GET /status/workflow`: persisted runtime snapshot, entity counts, locks, pauses, and current execution activity
+- `GET /status/entities`: entity list with phase/state, lock state, pause state, and processing flag
 - `GET /entity/{id}`: entity metadata plus file contents
 - `GET /entity/{id}/log`: current rendered entity transcript with `offset` and `next_offset`
 - `GET /entity/{id}/log/events?from_offset=<n>`: SSE stream with `snapshot`, `append`, and `status` events
 - `POST /entity`: create an entity
 - `PUT /entity/{id}`: update entity contents and/or move it to another phase/state
 - `PUT /entity/{id}/lock`: lock or unlock an entity
+- `PUT /entity/{id}/pause`: pause or resume an entity
 - `DELETE /entity/{id}`: delete an entity
 - `GET|POST|PUT|DELETE /file/{path...}`: CRUD for other root-scoped UTF-8 text and JSON files
 
@@ -161,7 +162,15 @@ Locking behavior:
 
 - Locked entities are excluded from workflow transitions until they are unlocked.
 - Locks are persisted separately from runtime state in `${root}/.dirorch_locks.json`.
-- The generic `/file` API cannot modify Dirorch-managed entity directories, `${root}/entity_logs/`, the runtime state file, or the lock file.
+
+Pause behavior:
+
+- Paused entities are excluded from workflow transitions until they are resumed.
+- Pauses are persisted separately from runtime state in `${root}/.dirorch_paused.json`.
+- Pausing a running entity sends `SIGTERM` to the active shell command and leaves the entity in place.
+- Resuming an entity changes eligibility for the next workflow pass; it does not force an immediate run.
+
+- The generic `/file` API cannot modify Dirorch-managed entity directories, `${root}/entity_logs/`, the runtime state file, the lock file, or the pause file.
 
 ## Per-Entity Logs
 

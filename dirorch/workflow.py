@@ -39,6 +39,11 @@ EntityCursorLoader = Callable[[str], str | None]
 EntityCursorSaver = Callable[[str, str], None]
 EntityCursorClearer = Callable[[], None]
 EntityLockChecker = Callable[[str], bool]
+EntityPauseChecker = Callable[[str], bool]
+
+
+class EntityPausedSignal(Exception):
+    """Internal control flow used to stop entity processing when paused."""
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,7 @@ class PhaseProcessorDeps:
     clear_entity_cursor: EntityCursorClearer
     execution_observer: NullExecutionObserver
     is_entity_locked: EntityLockChecker
+    is_entity_paused: EntityPauseChecker
     entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
 
@@ -70,6 +76,7 @@ class PhaseProcessor:
         self._clear_entity_cursor = deps.clear_entity_cursor
         self._execution_observer = deps.execution_observer
         self._is_entity_locked = deps.is_entity_locked
+        self._is_entity_paused = deps.is_entity_paused
         self._entity_log_emitter = deps.entity_log_emitter
         self.config = config
 
@@ -107,81 +114,84 @@ class PhaseProcessor:
         entity: Path,
     ) -> TransitionResult:
         if not entity.exists():
-            return TransitionResult(
-                moved=False,
-                failed=False,
-                destination_phase=None,
-                destination_state=None,
-                jump_phase=None,
-            )
+            return self._idle_transition_result()
 
         context = self._transition_context(transition, entity)
         extra_env = {"INPUT_ENTITY": str(entity.resolve())}
-        await self._emit_entity_event(
-            entity.name,
-            kind="transition.started",
-            source_state=transition.source,
-            destination_state=self._configured_destination_state(transition),
-            metadata={
-                "configured_destination": transition.destination.display_name,
-                "configured_jump": None
-                if transition.jump_target is None
-                else transition.jump_target.display_name,
-            },
-        )
-
-        if not await self._run_transition_side_effect(transition, entity, extra_env, context):
-            return await self._handle_transition_failure(transition, entity)
-
+        transition_started = False
         try:
-            destination = await self._resolve_transition_destination(
-                transition,
-                entity,
-                extra_env,
-                context,
+            self._ensure_entity_not_paused(entity.name)
+            await self._emit_entity_event(
+                entity.name,
+                kind="transition.started",
+                source_state=transition.source,
+                destination_state=self._configured_destination_state(transition),
+                metadata={
+                    "configured_destination": transition.destination.display_name,
+                    "configured_jump": None
+                    if transition.jump_target is None
+                    else transition.jump_target.display_name,
+                },
             )
-        except WorkflowError as exc:
-            return await self._handle_transition_failure(
-                transition,
-                entity,
-                reason=str(exc),
-            )
-        if destination is None:
-            return TransitionResult(
-                moved=False,
-                failed=False,
-                destination_phase=None,
-                destination_state=None,
-                jump_phase=None,
-            )
+            transition_started = True
+            if not await self._run_transition_side_effect(transition, entity, extra_env, context):
+                return await self._handle_transition_failure(transition, entity)
 
-        try:
-            jump_phase = await self._resolve_transition_jump(
-                transition,
-                entity,
-                extra_env,
-                context,
-            )
-        except WorkflowError as exc:
-            return await self._handle_transition_failure(
-                transition,
-                entity,
-                reason=str(exc),
-            )
-        if jump_phase is not None and jump_phase not in self._phase_names:
-            return await self._handle_transition_failure(
-                transition,
-                entity,
-                reason=f"selected invalid jump phase '{jump_phase}'",
-            )
+            self._ensure_entity_not_paused(entity.name)
+            try:
+                destination = await self._resolve_transition_destination(
+                    transition,
+                    entity,
+                    extra_env,
+                    context,
+                )
+            except WorkflowError as exc:
+                return await self._handle_transition_failure(
+                    transition,
+                    entity,
+                    reason=str(exc),
+                )
+            if destination is None:
+                return self._idle_transition_result()
 
-        return await self._apply_successful_transition(
-            transition,
-            entity,
-            destination.phase_name,
-            destination.state_name,
-            jump_phase,
-        )
+            self._ensure_entity_not_paused(entity.name)
+            try:
+                jump_phase = await self._resolve_transition_jump(
+                    transition,
+                    entity,
+                    extra_env,
+                    context,
+                )
+            except WorkflowError as exc:
+                return await self._handle_transition_failure(
+                    transition,
+                    entity,
+                    reason=str(exc),
+                )
+            if jump_phase is not None and jump_phase not in self._phase_names:
+                return await self._handle_transition_failure(
+                    transition,
+                    entity,
+                    reason=f"selected invalid jump phase '{jump_phase}'",
+                )
+
+            self._ensure_entity_not_paused(entity.name)
+            return await self._apply_successful_transition(
+                transition,
+                entity,
+                destination.phase_name,
+                destination.state_name,
+                jump_phase,
+            )
+        except EntityPausedSignal:
+            if transition_started:
+                await self._emit_entity_event(
+                    entity.name,
+                    kind="transition.paused",
+                    source_state=transition.source,
+                    destination_state=self._configured_destination_state(transition),
+                )
+            return self._paused_transition_result()
 
     def _transition_context(self, transition: TransitionConfig, entity: Path) -> str:
         return (
@@ -205,7 +215,7 @@ class PhaseProcessor:
                 destination_state=self._configured_destination_state(transition),
             )
             return True
-        return await self._hook_runner.run(
+        result = await self._hook_runner.run_command(
             HookConfig(cmd=transition.cmd, stdin=transition.stdin),
             extra_env,
             context,
@@ -215,6 +225,9 @@ class PhaseProcessor:
                 command_role="transition_side_effect",
             ),
         )
+        if result.paused:
+            raise EntityPausedSignal()
+        return result.succeeded
 
     async def _resolve_transition_destination(
         self,
@@ -282,6 +295,8 @@ class PhaseProcessor:
                 ),
             ),
         )
+        if result.paused:
+            raise EntityPausedSignal()
         if not result.succeeded:
             raise WorkflowError(f"{context} failed after retries")
         resolved = result.selector_output or None
@@ -345,6 +360,7 @@ class PhaseProcessor:
         return TransitionResult(
             moved=False,
             failed=True,
+            paused=False,
             destination_phase=None,
             destination_state=None,
             jump_phase=None,
@@ -358,6 +374,7 @@ class PhaseProcessor:
         destination_state: str,
         jump_phase: str | None,
     ) -> TransitionResult:
+        self._ensure_entity_not_paused(entity.name)
         await self._entities.move_to_state(destination_phase, destination_state, entity)
         await self._emit_entity_event(
             entity.name,
@@ -383,6 +400,7 @@ class PhaseProcessor:
         return TransitionResult(
             moved=True,
             failed=False,
+            paused=False,
             destination_phase=destination_phase,
             destination_state=destination_state,
             jump_phase=jump_phase,
@@ -416,6 +434,30 @@ class PhaseProcessor:
         transition: TransitionConfig,
     ) -> str | None:
         return transition.destination.constant
+
+    def _ensure_entity_not_paused(self, entity_id: str) -> None:
+        if self._is_entity_paused(entity_id):
+            raise EntityPausedSignal()
+
+    def _idle_transition_result(self) -> TransitionResult:
+        return TransitionResult(
+            moved=False,
+            failed=False,
+            paused=False,
+            destination_phase=None,
+            destination_state=None,
+            jump_phase=None,
+        )
+
+    def _paused_transition_result(self) -> TransitionResult:
+        return TransitionResult(
+            moved=False,
+            failed=False,
+            paused=True,
+            destination_phase=None,
+            destination_state=None,
+            jump_phase=None,
+        )
 
     def _hook_execution_context(
         self,
@@ -479,7 +521,10 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
             self.config.name, transition.source
         )
         entities = [
-            entity for entity in entities if not self._is_entity_locked(entity.name)
+            entity
+            for entity in entities
+            if not self._is_entity_locked(entity.name)
+            and not self._is_entity_paused(entity.name)
         ]
         if not entities:
             return 0, []
@@ -574,7 +619,10 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
     def _entities_for_pass(self) -> list[Path]:
         entities = self._entities.list_phase_entities(self.config)
         unlocked_entities = [
-            entity for entity in entities if not self._is_entity_locked(entity.name)
+            entity
+            for entity in entities
+            if not self._is_entity_locked(entity.name)
+            and not self._is_entity_paused(entity.name)
         ]
         cursor_name = self._load_entity_cursor(self.config.name)
         if cursor_name is None:
@@ -618,6 +666,9 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
         moved = 0
         current = entity
         while True:
+            if self._is_entity_paused(current.name):
+                self._clear_entity_cursor()
+                return moved
             state_name = current.parent.name
             transition = _find_transition_from_state(self.config, state_name)
             if transition is None:
@@ -679,6 +730,7 @@ class WorkflowEngine:
         logger: logging.Logger
         execution_observer: NullExecutionObserver | None = None
         is_entity_locked: EntityLockChecker | None = None
+        is_entity_paused: EntityPauseChecker | None = None
         entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
     def __init__(
@@ -696,6 +748,7 @@ class WorkflowEngine:
         self._did_run_init = False
         execution_observer = deps.execution_observer or NullExecutionObserver()
         is_entity_locked = deps.is_entity_locked or (lambda _entity_id: False)
+        is_entity_paused = deps.is_entity_paused or (lambda _entity_id: False)
         self._phase_processor_deps = PhaseProcessorDeps(
             hook_runner=deps.hook_runner,
             entities=deps.entities,
@@ -707,6 +760,7 @@ class WorkflowEngine:
             clear_entity_cursor=self._clear_entity_cursor,
             execution_observer=execution_observer,
             is_entity_locked=is_entity_locked,
+            is_entity_paused=is_entity_paused,
             entity_log_emitter=deps.entity_log_emitter,
         )
         self._execution_observer = execution_observer

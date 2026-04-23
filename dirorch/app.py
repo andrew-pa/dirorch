@@ -11,6 +11,7 @@ from pathlib import Path
 from .cli import configure_logging
 from .config_loader import load_workflow
 from .constants import LOCKS_FILE_NAME
+from .constants import PAUSED_FILE_NAME
 from .entities import EntityStore
 from .env import build_defined_hook_env, build_hook_env_from_defined
 from .entity_logging import (
@@ -25,6 +26,7 @@ from .files import FileStore
 from .hooks import HookRunner, HookRunnerConfig
 from .locks import EntityLockStore
 from .models import CliOptions
+from .pauses import ActiveShellCommandRegistry, EntityPauseStore
 from .services import (
     EntityAdminService,
     FileAdminService,
@@ -157,8 +159,16 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
     coordinator = MutationCoordinator()
     state = RuntimeStateStore(options.root, options.state_file)
     locks = EntityLockStore(options.root, LOCKS_FILE_NAME)
+    pauses = EntityPauseStore(options.root, PAUSED_FILE_NAME)
+    command_registry = ActiveShellCommandRegistry(pauses.is_paused)
     entities = EntityStore(options.root, config)
-    files = FileStore(options.root, config, options.state_file, LOCKS_FILE_NAME)
+    files = FileStore(
+        options.root,
+        config,
+        options.state_file,
+        LOCKS_FILE_NAME,
+        PAUSED_FILE_NAME,
+    )
     transcript_store = EntityTranscriptStore(options.root)
     broadcaster = EntityLogBroadcaster()
     entity_log_emitter = EntityLogRouter(
@@ -178,6 +188,8 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             retries=retries,
             logger=logger,
             entity_log_emitter=entity_log_emitter,
+            is_entity_paused=pauses.is_paused,
+            command_registry=command_registry,
         )
     )
     engine = WorkflowEngine(
@@ -189,6 +201,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             logger=logger,
             execution_observer=tracker,
             is_entity_locked=locks.is_locked,
+            is_entity_paused=pauses.is_paused,
             entity_log_emitter=entity_log_emitter,
         ),
     )
@@ -205,8 +218,10 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
         entity_service = EntityAdminService(
             entities=entities,
             locks=locks,
+            pauses=pauses,
             tracker=tracker,
             coordinator=coordinator,
+            command_registry=command_registry,
             entity_log_emitter=entity_log_emitter,
         )
         log_service = EntityLogService(
@@ -222,6 +237,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
                 tracker=tracker,
                 entities=entity_service,
                 locks=locks,
+                pauses=pauses,
                 config=config,
             ),
             entities=entity_service,

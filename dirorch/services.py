@@ -20,6 +20,7 @@ from .execution import ExecutionStatusTracker
 from .files import FileStore
 from .locks import EntityLockStore
 from .models import NamedTargetConfig, WorkflowConfig
+from .pauses import ActiveShellCommandRegistry, EntityPauseStore
 from .state import RuntimeStateStore
 from .errors import ConflictError, NotFoundError, ValidationError
 
@@ -88,14 +89,18 @@ class EntityAdminService:
         self,
         entities: EntityStore,
         locks: EntityLockStore,
+        pauses: EntityPauseStore,
         tracker: ExecutionStatusTracker,
         coordinator: MutationCoordinator,
+        command_registry: ActiveShellCommandRegistry,
         entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter(),
     ) -> None:
         self._entities = entities
         self._locks = locks
+        self._pauses = pauses
         self._tracker = tracker
         self._coordinator = coordinator
+        self._command_registry = command_registry
         self._entity_log_emitter = entity_log_emitter
 
     def list_entities(self) -> list[dict[str, Any]]:
@@ -204,6 +209,18 @@ class EntityAdminService:
         )
         return self.get_entity(entity_id)
 
+    async def set_paused(self, entity_id: str, paused: bool) -> dict[str, Any]:
+        self._require_unique_entity(entity_id)
+        async with self._coordinator.mutate():
+            self._pauses.set_paused(entity_id, paused)
+        if paused:
+            await self._command_registry.terminate_for_entity(entity_id)
+        await self._emit_entity_event(
+            entity_id,
+            "entity.paused" if paused else "entity.resumed",
+        )
+        return self.get_entity(entity_id)
+
     async def delete_entity(self, entity_id: str) -> None:
         entity = self._require_unique_entity(entity_id)
         if self._tracker.is_processing(entity_id):
@@ -213,6 +230,7 @@ class EntityAdminService:
             await self._emit_entity_event(entity_id, "entity.deleted")
             self._entities.delete(current)
             self._locks.clear(entity_id)
+            self._pauses.clear(entity_id)
 
     def _require_unique_entity(self, entity_id: str) -> Path:
         matches = self._entities.locate_entities(entity_id)
@@ -229,6 +247,7 @@ class EntityAdminService:
             "phase": phase_name,
             "state": state_name,
             "locked": self._locks.is_locked(entity.name),
+            "paused": self._pauses.is_paused(entity.name),
             "processing": self._tracker.is_processing(entity.name),
             "format": "json" if _parse_json_value(self._entities.read_text(entity)) is not None else "text",
         }
@@ -318,12 +337,14 @@ class WorkflowStatusService:
         tracker: ExecutionStatusTracker,
         entities: EntityAdminService,
         locks: EntityLockStore,
+        pauses: EntityPauseStore,
         config: WorkflowConfig,
     ) -> None:
         self._state = state
         self._tracker = tracker
         self._entities = entities
         self._locks = locks
+        self._pauses = pauses
         self._config = config
 
     def workflow_status(self) -> dict[str, Any]:
@@ -364,6 +385,7 @@ class WorkflowStatusService:
             "runtime_snapshot": snapshot_payload,
             "counts": counts,
             "locked_entities": len(self._locks.list_locks()),
+            "paused_entities": len(self._pauses.list_paused()),
             "execution": self._tracker.snapshot(),
         }
 

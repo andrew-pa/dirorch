@@ -10,6 +10,7 @@ import {
   CircleDot,
   FilePlus2,
   Lock,
+  Pause,
   Play,
   RefreshCw,
   Route,
@@ -74,6 +75,7 @@ export function WorkflowOverview({
       : 'no phase',
     cursorEntity ? `cursor ${cursorEntity.id}` : 'no cursor',
     `${status.locked_entities} locks`,
+    `${status.paused_entities} paused`,
   ].join(' · ')
 
   return (
@@ -138,7 +140,7 @@ export function WorkflowOverview({
             <InfoCard
               label="Locks"
               value={status.locked_entities}
-              meta={activeIds.length > 0 ? `${activeIds.length} running` : 'No active entities'}
+              meta={`${status.paused_entities} paused${activeIds.length > 0 ? ` · ${activeIds.length} running` : ''}`}
             />
 
             <InfoCard label="Jump stack">
@@ -405,6 +407,12 @@ function PhasePanel({
                         {items.filter((entity) => entity.locked).length}
                       </span>
                     ) : null}
+                    {items.some((entity) => entity.paused) ? (
+                      <span className="status-pill status-pill--warning">
+                        <Pause size={14} />
+                        {items.filter((entity) => entity.paused).length}
+                      </span>
+                    ) : null}
                     <button
                       className="icon-button"
                       type="button"
@@ -492,6 +500,12 @@ function PhasePanel({
                                 <span className="status-pill status-pill--warning">
                                   <Lock size={14} />
                                   Locked
+                                </span>
+                              ) : null}
+                              {entity.paused ? (
+                                <span className="status-pill status-pill--warning">
+                                  <Pause size={14} />
+                                  Paused
                                 </span>
                               ) : null}
                               {cursorEntity?.id === entity.id &&

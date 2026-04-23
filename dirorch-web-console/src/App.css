@@ -125,6 +125,17 @@
   color: #ffc1d1;
 }
 
+.inline-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(255, 209, 102, 0.24);
+  border-radius: 0.12rem;
+  background: linear-gradient(180deg, rgba(53, 37, 8, 0.94), rgba(27, 20, 6, 0.94));
+  color: #ffd982;
+}
+
 .error-banner {
   margin-bottom: 1rem;
 }

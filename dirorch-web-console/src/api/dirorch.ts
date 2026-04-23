@@ -75,6 +75,13 @@ export async function setEntityLocked(entityId: string, locked: boolean) {
   })
 }
 
+export async function setEntityPaused(entityId: string, paused: boolean) {
+  return requestJson<EntityDetail>(`/entity/${encodeURIComponent(entityId)}/pause`, {
+    method: 'PUT',
+    body: JSON.stringify({ paused }),
+  })
+}
+
 export async function getEntityLog(
   entityId: string,
   offset = 0,

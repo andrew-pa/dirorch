@@ -11,7 +11,7 @@ from aiohttp import web
 from yarl import URL
 
 from dirorch.cli import parse_args
-from dirorch.constants import LOCKS_FILE_NAME
+from dirorch.constants import LOCKS_FILE_NAME, PAUSED_FILE_NAME
 from dirorch.web.app import WebServer
 from main import CliOptions, run
 
@@ -86,6 +86,24 @@ async def _wait_for_entity_state(
                 return entity
         if asyncio.get_running_loop().time() >= deadline:
             raise AssertionError(f"Timed out waiting for entity {entity_id} in state {state}")
+        await asyncio.sleep(0.05)
+
+
+async def _wait_for_entity(
+    session: aiohttp.ClientSession,
+    base_url: str,
+    entity_id: str,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        async with session.get(f"{base_url}/status/entities") as response:
+            payload = await response.json()
+        for entity in payload["entities"]:
+            if entity["id"] == entity_id:
+                return entity
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(f"Timed out waiting for entity {entity_id}")
         await asyncio.sleep(0.05)
 
 
@@ -246,6 +264,7 @@ phases:
                         "phase": "tasks",
                         "state": "done",
                         "locked": True,
+                        "paused": False,
                         "processing": False,
                         "format": "text",
                     }
@@ -254,6 +273,7 @@ phases:
                 async with session.get(f"{base_url}/status/workflow") as response:
                     workflow_status = await response.json()
                 assert workflow_status["counts"]["tasks"]["done"] == 1
+                assert workflow_status["paused_entities"] == 0
                 assert workflow_status["execution"]["runner_state"] == "stopped"
 
                 async with session.get(f"{base_url}/entity/task.txt/log") as response:
@@ -443,6 +463,14 @@ phases:
                 assert response.status == 400
                 assert invalid_lock["code"] == "validation_error"
 
+                async with session.put(
+                    f"{base_url}/entity/doc.json/pause",
+                    json={"paused": "yes"},
+                ) as response:
+                    invalid_pause = await response.json()
+                assert response.status == 400
+                assert invalid_pause["code"] == "validation_error"
+
                 async with session.get(f"{base_url}/file/missing.txt") as response:
                     missing_file = await response.json()
                 assert response.status == 404
@@ -521,6 +549,7 @@ phases:
                 assert workflow_status["counts"]["tasks"]["new"] == 1
                 assert workflow_status["counts"]["tasks"]["done"] == 0
                 assert workflow_status["locked_entities"] == 1
+                assert workflow_status["paused_entities"] == 0
                 assert workflow_status["execution"]["runner_state"] == "idle"
 
                 await asyncio.sleep(0.3)
@@ -544,6 +573,160 @@ phases:
                 assert final_status["counts"]["tasks"]["new"] == 0
                 assert final_status["counts"]["tasks"]["done"] == 2
                 assert final_status["locked_entities"] == 0
+                assert final_status["paused_entities"] == 0
+        finally:
+            server_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await server_task
+
+    asyncio.run(scenario())
+
+
+def test_web_api_exposes_pause_that_blocks_workflow_processing(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+""",
+    )
+    _write(tmp_path / "tasks" / "new" / "paused.txt", "payload")
+    _write(tmp_path / PAUSED_FILE_NAME, json.dumps(["paused.txt"]))
+    port = _free_port()
+
+    async def scenario() -> None:
+        options = CliOptions(
+            workflow=workflow,
+            root=tmp_path,
+            retries_override=None,
+            state_file=".dirorch_runtime.json",
+            log_level="ERROR",
+            web=True,
+            web_host="127.0.0.1",
+            web_port=port,
+            watch=True,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        server_task = asyncio.create_task(run(options))
+        try:
+            await _wait_for_server(base_url)
+            async with aiohttp.ClientSession() as session:
+                entity = await _wait_for_entity(session, base_url, "paused.txt")
+                assert entity["paused"] is True
+                assert entity["state"] == "new"
+
+                async with session.get(f"{base_url}/status/workflow") as response:
+                    workflow_status = await response.json()
+                assert workflow_status["counts"]["tasks"]["new"] == 1
+                assert workflow_status["counts"]["tasks"]["done"] == 0
+                assert workflow_status["locked_entities"] == 0
+                assert workflow_status["paused_entities"] == 1
+                assert workflow_status["execution"]["runner_state"] == "idle"
+
+                await asyncio.sleep(0.3)
+                assert (tmp_path / "tasks" / "new" / "paused.txt").exists()
+                assert not (tmp_path / "tasks" / "done" / "paused.txt").exists()
+
+                async with session.put(
+                    f"{base_url}/entity/paused.txt/pause",
+                    json={"paused": False},
+                ) as response:
+                    resumed = await response.json()
+                assert response.status == 200
+                assert resumed["paused"] is False
+
+                _write(tmp_path / "tasks" / "new" / "trigger.txt", "go")
+                await _wait_for_path(tmp_path / "tasks" / "done" / "paused.txt")
+                await _wait_for_path(tmp_path / "tasks" / "done" / "trigger.txt")
+
+                async with session.get(f"{base_url}/status/workflow") as response:
+                    final_status = await response.json()
+                assert final_status["counts"]["tasks"]["new"] == 0
+                assert final_status["counts"]["tasks"]["done"] == 2
+                assert final_status["paused_entities"] == 0
+        finally:
+            server_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await server_task
+
+    asyncio.run(scenario())
+
+
+def test_web_api_pausing_running_entity_sigterms_shell_command(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          python -c "import pathlib, signal, sys, time;
+          marker = pathlib.Path('pause-term.txt');
+          signal.signal(signal.SIGTERM, lambda *_args: (marker.write_text('terminated', encoding='utf-8'), sys.exit(0)));
+          time.sleep(30)"
+""",
+    )
+    _write(tmp_path / "tasks" / "new" / "running.txt", "payload")
+    port = _free_port()
+
+    async def scenario() -> None:
+        options = CliOptions(
+            workflow=workflow,
+            root=tmp_path,
+            retries_override=None,
+            state_file=".dirorch_runtime.json",
+            log_level="ERROR",
+            web=True,
+            web_host="127.0.0.1",
+            web_port=port,
+            watch=True,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        server_task = asyncio.create_task(run(options))
+        try:
+            await _wait_for_server(base_url)
+            async with aiohttp.ClientSession() as session:
+                await _wait_for_processing(session, base_url, "running.txt")
+
+                async with session.put(
+                    f"{base_url}/entity/running.txt/pause",
+                    json={"paused": True},
+                ) as response:
+                    paused = await response.json()
+                assert response.status == 200
+                assert paused["paused"] is True
+
+                await _wait_for_path(tmp_path / "pause-term.txt")
+
+                deadline = asyncio.get_running_loop().time() + 5.0
+                while True:
+                    entity = await _wait_for_entity(session, base_url, "running.txt")
+                    if not entity["processing"]:
+                        break
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise AssertionError("Timed out waiting for running.txt to stop processing")
+                    await asyncio.sleep(0.05)
+
+                assert entity["paused"] is True
+                assert entity["state"] == "new"
+                assert (tmp_path / "tasks" / "new" / "running.txt").exists()
+                assert not (tmp_path / "tasks" / "done" / "running.txt").exists()
+                assert not (tmp_path / "tasks" / "_failed" / "running.txt").exists()
+
+                async with session.get(f"{base_url}/entity/running.txt/log") as response:
+                    log_payload = await response.json()
+                assert "entity paused" in log_payload["text"]
+                assert 'command terminated reason="entity paused"' in log_payload["text"]
+                assert "transition paused" in log_payload["text"]
         finally:
             server_task.cancel()
             with suppress(asyncio.CancelledError):

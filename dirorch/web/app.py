@@ -52,6 +52,7 @@ def build_web_app(services: WebServices) -> web.Application:
             web.post("/entity", _post_entity),
             web.put("/entity/{id}", _put_entity),
             web.put("/entity/{id}/lock", _put_entity_lock),
+            web.put("/entity/{id}/pause", _put_entity_pause),
             web.delete("/entity/{id}", _delete_entity),
             web.get(r"/file/{path:.*}", _get_file),
             web.post(r"/file/{path:.*}", _post_file),
@@ -254,6 +255,19 @@ async def _put_entity_lock(request: web.Request) -> web.Response:
     entity = await services.entities.set_locked(
         entity_id=request.match_info["id"],
         locked=locked,
+    )
+    return web.json_response(entity)
+
+
+async def _put_entity_pause(request: web.Request) -> web.Response:
+    payload = await _json_body(request)
+    paused = payload.get("paused")
+    if not isinstance(paused, bool):
+        raise ValidationError("'paused' must be a boolean")
+    services = _services(request)
+    entity = await services.entities.set_paused(
+        entity_id=request.match_info["id"],
+        paused=paused,
     )
     return web.json_response(entity)
 

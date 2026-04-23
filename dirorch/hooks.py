@@ -5,6 +5,7 @@ import codecs
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 from .constants import SELECTOR_PIPE_ENV_VAR
 from .entity_logging import EntityLogEvent, EntityLogEmitter, NullEntityLogEmitter, utc_now
 from .models import HookConfig
+from .pauses import ActiveShellCommandRegistry, terminate_process_group
 from .template_engine import TemplateRenderError, TemplateRenderer
 
 
@@ -23,6 +25,8 @@ class HookRunnerConfig:
     retries: int
     logger: logging.Logger
     entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
+    is_entity_paused: Callable[[str], bool] = lambda _entity_id: False
+    command_registry: ActiveShellCommandRegistry | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,7 @@ class HookExecutionContext:
 @dataclass(frozen=True)
 class CommandResult:
     succeeded: bool
+    paused: bool = False
     exit_code: int | None = None
     selector_output: str | None = None
     attempts_used: int = 0
@@ -60,6 +65,8 @@ class HookRunner:
         self._retries = config.retries
         self._logger = config.logger
         self._entity_log_emitter = config.entity_log_emitter
+        self._is_entity_paused = config.is_entity_paused
+        self._command_registry = config.command_registry
         self._template_renderer = TemplateRenderer(self._root)
 
     async def run(
@@ -93,6 +100,13 @@ class HookRunner:
         base_template_env = self._template_env | extra_env
         last_exit_code: int | None = None
         for attempt in range(1, attempts + 1):
+            if self._should_pause(execution_context):
+                return CommandResult(
+                    succeeded=False,
+                    paused=True,
+                    exit_code=None,
+                    attempts_used=attempt - 1,
+                )
             selector_pipe = (
                 self._create_selector_pipe() if capture_selector_output else None
             )
@@ -165,6 +179,19 @@ class HookRunner:
                     attempt=attempt,
                     execution_context=execution_context,
                 )
+                if result.paused:
+                    await self._emit_command_terminated(
+                        rendered_cmd,
+                        attempt,
+                        execution_context,
+                    )
+                    self._logger.info("%s interrupted because entity is paused", context)
+                    return CommandResult(
+                        succeeded=False,
+                        paused=True,
+                        exit_code=result.exit_code,
+                        attempts_used=attempt,
+                    )
                 last_exit_code = result.exit_code
                 await self._emit_command_finished(
                     rendered_cmd,
@@ -227,7 +254,9 @@ class HookRunner:
             stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        registration = await self._register_process(execution_context, process)
 
         assert process.stdout is not None
         assert process.stderr is not None
@@ -261,6 +290,7 @@ class HookRunner:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(stdin_task, stdout_task, stderr_task, return_exceptions=True)
+            await self._unregister_process(execution_context, registration)
 
         selector_output = None
         if selector_pipe is not None:
@@ -270,6 +300,7 @@ class HookRunner:
             )
         return CommandResult(
             succeeded=process.returncode == 0,
+            paused=registration.pause_requested if registration is not None else False,
             exit_code=process.returncode,
             selector_output=selector_output,
             attempts_used=attempt,
@@ -355,6 +386,20 @@ class HookRunner:
             kind="command.started",
             command=command,
             attempt=attempt,
+        )
+
+    async def _emit_command_terminated(
+        self,
+        command: str,
+        attempt: int,
+        execution_context: HookExecutionContext | None,
+    ) -> None:
+        await self._emit_event(
+            execution_context,
+            kind="command.terminated",
+            command=command,
+            attempt=attempt,
+            metadata={"reason": "entity paused"},
         )
 
     async def _emit_command_finished(
@@ -455,3 +500,40 @@ class HookRunner:
                 metadata=event_metadata,
             )
         )
+
+    def _should_pause(self, execution_context: HookExecutionContext | None) -> bool:
+        return (
+            execution_context is not None
+            and execution_context.entity_id is not None
+            and self._is_entity_paused(execution_context.entity_id)
+        )
+
+    async def _register_process(
+        self,
+        execution_context: HookExecutionContext | None,
+        process: asyncio.subprocess.Process,
+    ):
+        if (
+            self._command_registry is None
+            or execution_context is None
+            or execution_context.entity_id is None
+        ):
+            return None
+        return await self._command_registry.register(
+            execution_context.entity_id,
+            lambda: terminate_process_group(process.pid),
+        )
+
+    async def _unregister_process(
+        self,
+        execution_context: HookExecutionContext | None,
+        registration,
+    ) -> None:
+        if (
+            registration is None
+            or self._command_registry is None
+            or execution_context is None
+            or execution_context.entity_id is None
+        ):
+            return
+        await self._command_registry.unregister(execution_context.entity_id, registration)

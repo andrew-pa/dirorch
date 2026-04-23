@@ -17,11 +17,12 @@ class FileStore:
         config: WorkflowConfig,
         state_file_name: str,
         locks_file_name: str,
+        paused_file_name: str,
     ) -> None:
         self._root = root.resolve()
         self._reserved_top_level = {phase.name for phase in config.phases}
         self._reserved_top_level.add(ENTITY_LOGS_DIR_NAME)
-        self._reserved_files = {state_file_name, locks_file_name}
+        self._reserved_files = {state_file_name, locks_file_name, paused_file_name}
 
     def read(self, relative_path: str) -> tuple[Path, str]:
         path = self._resolve_path(relative_path)

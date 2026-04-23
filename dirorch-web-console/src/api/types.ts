@@ -44,6 +44,7 @@ export interface EntitySummary {
   phase: string
   state: string
   locked: boolean
+  paused: boolean
   processing: boolean
   format: ContentFormat
 }
@@ -122,6 +123,7 @@ export interface WorkflowStatusPayload {
   runtime_snapshot: RuntimeSnapshot | null
   counts: Record<string, Record<string, number>>
   locked_entities: number
+  paused_entities: number
   execution: ExecutionStatus
 }
 

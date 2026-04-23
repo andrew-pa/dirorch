@@ -98,6 +98,7 @@ Current `code` values:
   "phase": "tasks",
   "state": "new",
   "locked": false,
+  "paused": false,
   "processing": false,
   "format": "text"
 }
@@ -109,6 +110,7 @@ Fields:
 - `phase: string`
 - `state: string`
 - `locked: boolean`
+- `paused: boolean`
 - `processing: boolean`
 - `format: "text" | "json"`
 
@@ -375,6 +377,7 @@ Response `200`:
     }
   },
   "locked_entities": 1,
+  "paused_entities": 0,
   "execution": {
     "runner_state": "idle",
     "current_phase": "tasks",
@@ -402,6 +405,7 @@ Fields:
   - each phase value is an object mapping state name to integer count
   - `_failed` is always included
 - `locked_entities: integer`
+- `paused_entities: integer`
 - `execution: ExecutionStatus`
 
 Operational semantics:
@@ -428,6 +432,7 @@ Response `200`:
       "phase": "tasks",
       "state": "new",
       "locked": false,
+      "paused": false,
       "processing": false,
       "format": "text"
     }
@@ -442,6 +447,7 @@ Fields:
 Operational semantics:
 
 - Results are derived from the current on-disk phase/state layout.
+- `paused=true` means the entity is excluded from transition selection until resumed.
 - `processing=true` is transient and only indicates active in-process execution for the current runner.
 
 Errors:
@@ -671,6 +677,45 @@ Errors:
 - `404` entity not found
 - `409` entity is ambiguous or currently processing
 
+### PUT `/entity/{id}/pause`
+
+Pause or resume an entity.
+
+Path params:
+
+- `id: string`
+
+Request body:
+
+```json
+{
+  "paused": true
+}
+```
+
+Fields:
+
+- `paused: boolean` required
+
+Operational semantics:
+
+- A paused entity is skipped by workflow transition selection.
+- Pause state is persisted in `${root}/.dirorch_paused.json`.
+- The operation is idempotent.
+- Pausing a running entity sends `SIGTERM` to the active shell command and leaves the entity in place.
+- Resuming an entity does not itself trigger execution; it only changes eligibility for the next workflow pass.
+
+Success:
+
+- `200 OK`
+- response body: updated `EntityDetail`
+
+Errors:
+
+- `400` invalid request shape
+- `404` entity not found
+- `409` entity is ambiguous
+
 ### DELETE `/entity/{id}`
 
 Delete an entity file.
@@ -682,6 +727,7 @@ Path params:
 Operational semantics:
 
 - Also clears any persisted lock record for that entity id.
+- Also clears any persisted pause record for that entity id.
 - Deletion is rejected while the entity is actively being processed.
 
 Success:
@@ -720,6 +766,7 @@ Forbidden path categories:
 - `entity_logs/...`
 - the runtime state file, typically `.dirorch_runtime.json`
 - the lock file `.dirorch_locks.json`
+- the pause file `.dirorch_paused.json`
 
 Errors:
 

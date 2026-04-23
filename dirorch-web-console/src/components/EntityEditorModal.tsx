@@ -7,7 +7,9 @@ import {
   FileJson2,
   LoaderCircle,
   Lock,
+  Pause,
   Plus,
+  Play,
   Save,
   X,
 } from 'lucide-react'
@@ -19,6 +21,7 @@ import {
   getEntity,
   queryKeys,
   setEntityLocked,
+  setEntityPaused,
   updateEntity,
 } from '../api/dirorch'
 import type {
@@ -88,6 +91,7 @@ export function EntityEditorModal({
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isPausePending, setIsPausePending] = useState(false)
   const [isEditing, setIsEditing] = useState(mode === 'create')
   const [lockState, setLockState] = useState<'idle' | 'pending' | 'ready' | 'error'>(
     mode === 'create' ? 'ready' : 'idle',
@@ -237,6 +241,9 @@ export function EntityEditorModal({
     ? [...currentPhase.states, ...currentPhase.reserved_states]
     : []
   const originalEntity = loadedEntityRef.current
+  const currentEntity = detailQuery.data ?? summary ?? null
+  const isPaused = currentEntity?.paused ?? false
+  const isProcessing = currentEntity?.processing ?? false
   const readOnly = mode === 'edit' && (!isEditing || lockState !== 'ready')
   const hasChanges =
     mode === 'create'
@@ -322,6 +329,34 @@ export function EntityEditorModal({
     }
   }
 
+  async function handleTogglePaused() {
+    if (mode !== 'edit' || !entityId || !currentEntity) {
+      return
+    }
+
+    if (
+      !currentEntity.paused &&
+      currentEntity.processing &&
+      !window.confirm(
+        'This entity is currently running. Pausing it will send SIGTERM to the active shell command and leave the entity in place. Continue?',
+      )
+    ) {
+      return
+    }
+
+    setSaveError(null)
+    setIsPausePending(true)
+
+    try {
+      await setEntityPaused(entityId, !currentEntity.paused)
+      await invalidateConsoleQueries(queryClient, entityId)
+    } catch (error) {
+      setSaveError(formatError(error))
+    } finally {
+      setIsPausePending(false)
+    }
+  }
+
   function handleEnterEditMode() {
     setSaveError(null)
     setLockState('pending')
@@ -344,27 +379,53 @@ export function EntityEditorModal({
             actions={
               <>
                 {mode === 'edit' ? (
-                  <span
-                    className={clsx(
-                      'status-pill',
-                      !isEditing
-                        ? 'status-pill--neutral'
+                  <>
+                    {entityId ? (
+                      <button
+                        className="button button--ghost"
+                        type="button"
+                        disabled={isPausePending || detailQuery.isLoading}
+                        onClick={() => void handleTogglePaused()}
+                      >
+                        {isPausePending ? (
+                          <LoaderCircle className="spin" size={16} />
+                        ) : isPaused ? (
+                          <Play size={16} />
+                        ) : (
+                          <Pause size={16} />
+                        )}
+                        {isPaused ? 'Resume' : 'Pause'}
+                      </button>
+                    ) : null}
+
+                    <span
+                      className={clsx(
+                        'status-pill',
+                        !isEditing
+                          ? 'status-pill--neutral'
+                          : lockState === 'ready'
+                            ? 'status-pill--success'
+                            : lockState === 'error'
+                              ? 'status-pill--danger'
+                              : 'status-pill--warning',
+                      )}
+                    >
+                      <Lock size={14} />
+                      {!isEditing
+                        ? 'View only'
                         : lockState === 'ready'
-                        ? 'status-pill--success'
-                        : lockState === 'error'
-                          ? 'status-pill--danger'
-                          : 'status-pill--warning',
-                    )}
-                  >
-                    <Lock size={14} />
-                    {!isEditing
-                      ? 'View only'
-                      : lockState === 'ready'
-                      ? 'Locked'
-                      : lockState === 'error'
-                        ? 'Lock failed'
-                        : 'Locking'}
-                  </span>
+                          ? 'Locked'
+                          : lockState === 'error'
+                            ? 'Lock failed'
+                            : 'Locking'}
+                    </span>
+                    {isPaused ? (
+                      <span className="status-pill status-pill--warning">
+                        <Pause size={14} />
+                        Paused
+                      </span>
+                    ) : null}
+                  </>
                 ) : null}
 
                 <Dialog.Close className="icon-button" aria-label="Close">
@@ -573,6 +634,14 @@ export function EntityEditorModal({
                     </section>
                   </div>
                 )}
+
+                {mode === 'edit' && isProcessing && !isPaused ? (
+                  <div className="inline-warning">
+                    <Pause size={16} />
+                    Pausing this entity will send SIGTERM to the active shell command and stop
+                    further processing until it is resumed.
+                  </div>
+                ) : null}
 
                 {saveError ? <div className="inline-error">{saveError}</div> : null}
               </div>
