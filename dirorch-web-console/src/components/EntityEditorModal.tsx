@@ -393,6 +393,11 @@ export function EntityEditorModal({
             presentation === 'panel' && 'entity-dialog--panel',
             fullscreenPane && 'entity-dialog--fullscreen-child',
           )}
+          onInteractOutside={(event) => {
+            if (presentation === 'panel') {
+              event.preventDefault()
+            }
+          }}
         >
           <SectionHeader
             className="dialog-header"
