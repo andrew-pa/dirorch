@@ -521,6 +521,15 @@
   background: rgba(12, 19, 28, 0.92);
 }
 
+.button--warning {
+  border-color: rgba(255, 209, 102, 0.48);
+  background:
+    linear-gradient(180deg, rgba(255, 209, 102, 0.18), rgba(34, 24, 6, 0.98)),
+    rgba(42, 29, 7, 0.96);
+  color: #ffe3a3;
+  box-shadow: 0 0 18px rgba(255, 209, 102, 0.12);
+}
+
 .button:disabled,
 .icon-button:disabled,
 .segmented-control__button:disabled {

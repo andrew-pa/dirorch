@@ -659,14 +659,6 @@ export function EntityEditorModal({
                   </div>
                 )}
 
-                {mode === 'edit' && isProcessing && !isPaused ? (
-                  <div className="inline-warning">
-                    <Pause size={16} />
-                    Pausing this entity will send SIGTERM to the active shell command and stop
-                    further processing until it is resumed.
-                  </div>
-                ) : null}
-
                 {saveError ? <div className="inline-error">{saveError}</div> : null}
               </div>
 
@@ -677,7 +669,10 @@ export function EntityEditorModal({
                   </button>
                   {mode === 'edit' && entityId ? (
                     <button
-                      className="button button--ghost"
+                      className={clsx(
+                        'button button--ghost',
+                        isProcessing && !isPaused && 'button--warning',
+                      )}
                       type="button"
                       disabled={isPausePending || detailQuery.isLoading}
                       onClick={() => void handleTogglePaused()}
