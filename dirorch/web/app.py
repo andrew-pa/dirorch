@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, overload
 
 from aiohttp import web
 
@@ -339,6 +339,26 @@ def _optional_string(payload: dict[str, Any], key: str) -> str | None:
     if not isinstance(value, str) or not value:
         raise ValidationError(f"'{key}' must be a non-empty string when provided")
     return value
+
+
+@overload
+def _optional_int_query(
+    request: web.Request,
+    key: str,
+    *,
+    default: int,
+    minimum: int,
+) -> int: ...
+
+
+@overload
+def _optional_int_query(
+    request: web.Request,
+    key: str,
+    *,
+    default: None,
+    minimum: int,
+) -> int | None: ...
 
 
 def _optional_int_query(

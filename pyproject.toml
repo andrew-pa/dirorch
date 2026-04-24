@@ -23,6 +23,10 @@ dev = [
     "pytest>=8.4.0",
 ]
 
+[tool.pyright]
+include = ["dirorch", "main.py", "tests"]
+exclude = ["build", ".uv-cache", ".venv"]
+
 [tool.setuptools]
 py-modules = ["main"]
 

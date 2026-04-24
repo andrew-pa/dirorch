@@ -789,7 +789,9 @@ phases:
                         if event_name != "append":
                             continue
                         assert payload is not None
-                        if "end\n" in payload["text"]:
+                        text = payload["text"]
+                        assert isinstance(text, str)
+                        if "end\n" in text:
                             break
 
                 await _wait_for_path(tmp_path / "tasks" / "done" / "stream.txt")

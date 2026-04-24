@@ -32,7 +32,9 @@ export function EntityLogViewer({ entityId }: EntityLogViewerProps) {
   const [autoFollow, setAutoFollow] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  autoFollowRef.current = autoFollow
+  useEffect(() => {
+    autoFollowRef.current = autoFollow
+  }, [autoFollow])
 
   const appendText = useEffectEvent((text: string) => {
     const terminal = terminalRef.current

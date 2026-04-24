@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .constants import SELECTOR_PIPE_ENV_VAR
-from .entity_logging import EntityLogEvent, EntityLogEmitter, NullEntityLogEmitter, utc_now
+from .entity_logging import (
+    EntityLogEvent,
+    EntityLogEmitter,
+    EntityLogMetadataValue,
+    NullEntityLogEmitter,
+    utc_now,
+)
 from .models import HookConfig
 from .pauses import ActiveShellCommandRegistry, terminate_process_group
 from .template_engine import TemplateRenderError, TemplateRenderer
@@ -527,11 +533,11 @@ class HookRunner:
         returncode: int | None = None,
         stream: str | None = None,
         text: str | None = None,
-        metadata: dict[str, str | int | bool | None] | None = None,
+        metadata: dict[str, EntityLogMetadataValue] | None = None,
     ) -> None:
         if execution_context is None or execution_context.entity_id is None:
             return
-        event_metadata = {
+        event_metadata: dict[str, EntityLogMetadataValue] = {
             "command_role": execution_context.command_role,
             "context_label": execution_context.context_label,
         }
