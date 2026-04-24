@@ -381,7 +381,7 @@ function PhasePanel({
                 }}
               >
                 <header className="state-card__header">
-                  <div>
+                  <div className="state-card__heading">
                     <div className="state-card__name">{stateName}</div>
                     {dynamicOutgoingTransitions.length > 0 ? (
                       <div className="state-card__transition-tags">
@@ -390,9 +390,12 @@ function PhasePanel({
                             key={`${phase.name}:${stateName}:${index}`}
                             content={<TransitionTooltipContent transition={transition} />}
                           >
-                            <button className="state-card__transition-tag" type="button">
+                            <button
+                              aria-label={`Dynamic transition from ${stateName}`}
+                              className="state-card__transition-tag"
+                              type="button"
+                            >
                               <ArrowRight size={12} />
-                              <span>dynamic</span>
                             </button>
                           </Tooltip>
                         ))}

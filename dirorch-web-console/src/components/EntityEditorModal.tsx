@@ -394,26 +394,37 @@ export function EntityEditorModal({
             }
             actions={
               <>
+                {mode === 'edit' && entityId ? (
+                  <div className="segmented-control" role="tablist" aria-label="Entity panel">
+                    <button
+                      className={clsx(
+                        'segmented-control__button',
+                        activeTab === 'content' && 'is-active',
+                      )}
+                      role="tab"
+                      type="button"
+                      aria-selected={activeTab === 'content'}
+                      onClick={() => setActiveTab('content')}
+                    >
+                      Content
+                    </button>
+                    <button
+                      className={clsx(
+                        'segmented-control__button',
+                        activeTab === 'logs' && 'is-active',
+                      )}
+                      role="tab"
+                      type="button"
+                      aria-selected={activeTab === 'logs'}
+                      onClick={() => setActiveTab('logs')}
+                    >
+                      Logs
+                    </button>
+                  </div>
+                ) : null}
+
                 {mode === 'edit' ? (
                   <>
-                    {entityId ? (
-                      <button
-                        className="button button--ghost"
-                        type="button"
-                        disabled={isPausePending || detailQuery.isLoading}
-                        onClick={() => void handleTogglePaused()}
-                      >
-                        {isPausePending ? (
-                          <LoaderCircle className="spin" size={16} />
-                        ) : isPaused ? (
-                          <Play size={16} />
-                        ) : (
-                          <Pause size={16} />
-                        )}
-                        {isPaused ? 'Resume' : 'Pause'}
-                      </button>
-                    ) : null}
-
                     <span
                       className={clsx(
                         'status-pill',
@@ -472,37 +483,6 @@ export function EntityEditorModal({
             </div>
           ) : (
             <>
-              {mode === 'edit' && entityId ? (
-                <div className="dialog-tabs">
-                  <div className="segmented-control" role="tablist" aria-label="Entity panel">
-                    <button
-                      className={clsx(
-                        'segmented-control__button',
-                        activeTab === 'content' && 'is-active',
-                      )}
-                      role="tab"
-                      type="button"
-                      aria-selected={activeTab === 'content'}
-                      onClick={() => setActiveTab('content')}
-                    >
-                      Content
-                    </button>
-                    <button
-                      className={clsx(
-                        'segmented-control__button',
-                        activeTab === 'logs' && 'is-active',
-                      )}
-                      role="tab"
-                      type="button"
-                      aria-selected={activeTab === 'logs'}
-                      onClick={() => setActiveTab('logs')}
-                    >
-                      Logs
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
               <div className="dialog-body">
                 {activeTab === 'logs' && mode === 'edit' && entityId ? (
                   <EntityLogViewer entityId={entityId} />
@@ -628,11 +608,13 @@ export function EntityEditorModal({
                                 type="button"
                                 onClick={() => setSelectedFilePath(reference.value)}
                               >
-                                <div>
-                                  <div className="linked-file-list__key">
+                                <div className="linked-file-list__item-content">
+                                  <span className="linked-file-list__key">
                                     {reference.location}
-                                  </div>
-                                  <div className="linked-file-list__path">{reference.value}</div>
+                                  </span>
+                                  <span className="linked-file-list__path">
+                                    {reference.value}
+                                  </span>
                                 </div>
                                 <ChevronRight size={16} />
                               </button>
@@ -668,9 +650,28 @@ export function EntityEditorModal({
               </div>
 
               <footer className="dialog-footer">
-                <button className="button button--ghost" type="button" onClick={onClose}>
-                  {mode === 'edit' && !isEditing ? 'Close' : 'Cancel'}
-                </button>
+                <div className="dialog-footer__secondary">
+                  <button className="button button--ghost" type="button" onClick={onClose}>
+                    {mode === 'edit' && !isEditing ? 'Close' : 'Cancel'}
+                  </button>
+                  {mode === 'edit' && entityId ? (
+                    <button
+                      className="button button--ghost"
+                      type="button"
+                      disabled={isPausePending || detailQuery.isLoading}
+                      onClick={() => void handleTogglePaused()}
+                    >
+                      {isPausePending ? (
+                        <LoaderCircle className="spin" size={16} />
+                      ) : isPaused ? (
+                        <Play size={16} />
+                      ) : (
+                        <Pause size={16} />
+                      )}
+                      {isPaused ? 'Resume' : 'Pause'}
+                    </button>
+                  ) : null}
+                </div>
                 {mode === 'edit' && !isEditing ? (
                   <button
                     className="button button--primary"

@@ -39,7 +39,7 @@
 }
 
 .console-header__title {
-  font-size: clamp(1.45rem, 1.9vw, 1.75rem);
+  font-size: clamp(1.25rem, 1.6vw, 1.55rem);
   line-height: 1;
   color: #f3fbff;
   text-shadow: 0 0 18px rgba(69, 232, 255, 0.12);
@@ -200,6 +200,7 @@
 }
 
 .phase-row__title h2 {
+  font-size: clamp(1.05rem, 1.35vw, 1.35rem);
   color: #f3fbff;
 }
 
@@ -250,7 +251,7 @@
 
 .phase-row__states {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
   align-items: start;
   gap: 0.55rem;
   position: relative;
@@ -308,9 +309,16 @@
   gap: 0.5rem;
 }
 
+.state-card__heading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 .state-card__name {
   font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 700;
   color: #ecf9ff;
 }
@@ -319,15 +327,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  margin-top: 0.45rem;
 }
 
 .state-card__transition-tag {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  min-height: 1.4rem;
-  padding: 0 0.45rem;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
   border: 1px solid rgba(69, 232, 255, 0.22);
   border-radius: 999px;
   background: rgba(69, 232, 255, 0.08);
@@ -627,7 +635,7 @@
 }
 
 .dialog-title {
-  font-size: 1.8rem;
+  font-size: 1.45rem;
 }
 
 .dialog-tabs {
@@ -759,6 +767,24 @@
   background: rgba(69, 232, 255, 0.1);
 }
 
+.linked-file-list__item-content {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.linked-file-list__key {
+  flex: 0 0 auto;
+}
+
+.linked-file-list__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .linked-file-panel {
   height: 100%;
   padding: 0.9rem;
@@ -780,6 +806,13 @@
   padding: 0.85rem 1.25rem 1.15rem;
   position: relative;
   z-index: 2;
+}
+
+.dialog-footer__secondary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
 }
 
 .dialog-footer .button--ghost {
@@ -914,7 +947,7 @@
 @media (min-width: 1280px) {
   .app-workspace {
     --editor-panel-width: calc(min(1780px, calc(100vw - 1.25rem)) * 0.4);
-    --workspace-gap: 0.85rem;
+    --workspace-gap: 1.5rem;
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(28rem, 2fr);
     gap: var(--workspace-gap);
@@ -959,7 +992,7 @@
   }
 
   .entity-dialog--panel .dialog-title {
-    font-size: clamp(1.65rem, 2.2vw, 2.15rem);
+    font-size: clamp(1.35rem, 1.7vw, 1.75rem);
   }
 
   .entity-dialog--panel .dialog-tabs {

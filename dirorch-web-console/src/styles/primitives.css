@@ -43,7 +43,7 @@
   color: var(--accent-strong);
   text-transform: uppercase;
   letter-spacing: 0.2em;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   font-weight: 600;
 }
 
@@ -74,7 +74,7 @@
 
 .section-header__subtitle {
   color: var(--text-soft);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .empty-state {
@@ -92,7 +92,7 @@
 
 .info-card__value {
   margin-top: 0.08rem;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   font-weight: 600;
   line-height: 1.15;
   text-shadow: 0 0 12px rgba(69, 232, 255, 0.14);
