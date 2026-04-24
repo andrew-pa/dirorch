@@ -701,6 +701,14 @@ function TransitionGraph({
       status.execution.activity.source_state,
     ],
   )
+  const stateRowTop = layoutSnapshot?.stateRects.find(Boolean)?.top ?? 0
+  const hasWrappedStates = Boolean(
+    layoutSnapshot?.stateRects.some((rect) => rect && rect.top > stateRowTop + 4),
+  )
+
+  if (hasWrappedStates) {
+    return null
+  }
 
   return (
     <div className="transition-graph" ref={containerRef}>

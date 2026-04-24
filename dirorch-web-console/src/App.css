@@ -1,3 +1,15 @@
+.app-workspace {
+  width: 100%;
+}
+
+.app-workspace__workflow {
+  min-width: 0;
+}
+
+.app-workspace__editor-slot {
+  display: none;
+}
+
 .console-shell {
   width: min(1680px, calc(100vw - 1.25rem));
   margin: 0 auto;
@@ -238,7 +250,7 @@
 
 .phase-row__states {
   display: grid;
-  grid-template-columns: repeat(var(--state-count), minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
   align-items: start;
   gap: 0.55rem;
   position: relative;
@@ -248,6 +260,7 @@
 .state-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   padding: 0.7rem;
   border: 1px solid var(--border);
@@ -580,6 +593,11 @@
   z-index: 40;
   background: rgba(3, 8, 14, 0.6);
   backdrop-filter: blur(14px);
+  animation: overlay-fade-in 180ms ease both;
+}
+
+.dialog-overlay--panel {
+  display: none;
 }
 
 .dialog-content {
@@ -594,6 +612,7 @@
     linear-gradient(180deg, rgba(15, 22, 33, 0.98), rgba(8, 13, 21, 0.98));
   overflow: hidden;
   box-shadow: var(--shadow-strong);
+  animation: modal-enter 220ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
 }
 
 .entity-dialog {
@@ -858,6 +877,81 @@
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.65rem) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(1.4rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-workspace {
+    --editor-panel-width: calc(min(1780px, calc(100vw - 1.25rem)) * 0.4);
+    --workspace-gap: 0.85rem;
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(28rem, 2fr);
+    gap: var(--workspace-gap);
+    width: min(1780px, calc(100vw - 1.25rem));
+    margin: 0 auto;
+    padding: 0 0.625rem;
+    transition: grid-template-columns 260ms cubic-bezier(0.2, 0.85, 0.2, 1);
+  }
+
+  .app-workspace:not(.app-workspace--editor-open) {
+    display: block;
+    width: 100%;
+    padding: 0;
+  }
+
+  .app-workspace--editor-open .console-shell {
+    width: 100%;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .app-workspace__editor-slot {
+    display: block;
+  }
+
+  .entity-dialog--panel {
+    inset: 0.85rem calc((100vw - min(1780px, calc(100vw - 1.25rem))) / 2 + 0.625rem) 0.85rem auto;
+    width: calc(min(1780px, calc(100vw - 1.25rem)) * 0.4);
+    max-width: calc(100vw - 1.25rem);
+    margin: 0;
+    border-radius: 0.18rem;
+    border-color: rgba(69, 232, 255, 0.2);
+    box-shadow:
+      -18px 0 54px rgba(0, 0, 0, 0.32),
+      inset 1px 0 0 rgba(69, 232, 255, 0.12),
+      var(--shadow-strong);
+    animation: panel-enter 260ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
   }
 }
 

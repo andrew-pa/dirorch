@@ -42,6 +42,7 @@ interface EntityEditorModalProps {
   initialState: string
   mode: 'create' | 'edit'
   onClose: () => void
+  presentation?: 'modal' | 'panel'
   summary?: EntitySummary
   workflow: WorkflowDefinition
 }
@@ -69,6 +70,7 @@ export function EntityEditorModal({
   initialState,
   mode,
   onClose,
+  presentation = 'modal',
   summary,
   workflow,
 }: EntityEditorModalProps) {
@@ -364,10 +366,24 @@ export function EntityEditorModal({
   }
 
   return (
-    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+    <Dialog.Root
+      modal={presentation !== 'panel'}
+      open
+      onOpenChange={(open) => !open && onClose()}
+    >
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="surface surface--padding-none surface--radius-xl dialog-content entity-dialog">
+        <Dialog.Overlay
+          className={clsx(
+            'dialog-overlay',
+            presentation === 'panel' && 'dialog-overlay--panel',
+          )}
+        />
+        <Dialog.Content
+          className={clsx(
+            'surface surface--padding-none surface--radius-xl dialog-content entity-dialog',
+            presentation === 'panel' && 'entity-dialog--panel',
+          )}
+        >
           <SectionHeader
             className="dialog-header"
             eyebrow={mode === 'edit' ? 'Entity' : 'New entity'}

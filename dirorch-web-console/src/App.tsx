@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, LoaderCircle } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   ApiError,
@@ -32,6 +32,18 @@ export default function App() {
   const queryClient = useQueryClient()
   const [modalState, setModalState] = useState<ModalState>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
+  const [usePanelEditor, setUsePanelEditor] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia('(min-width: 1280px)').matches,
+  )
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 1280px)')
+    const handleChange = () => setUsePanelEditor(mediaQuery.matches)
+
+    handleChange()
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
 
   const workflowQuery = useQuery({
     queryKey: queryKeys.workflow,
@@ -127,23 +139,37 @@ export default function App() {
         </main>
       ) : null}
 
-      <WorkflowOverview
-        entities={entitiesQuery.data.entities}
-        isRefreshing={statusQuery.isRefetching || entitiesQuery.isRefetching}
-        movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
-        onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
-        onMoveEntity={(entity, phase, state) => void handleMoveEntity(entity, phase, state)}
-        onRefresh={() => void handleRefresh()}
-        onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}
-        status={statusQuery.data}
-        workflow={workflowQuery.data}
-      />
+      <div
+        className={
+          modalState && usePanelEditor
+            ? 'app-workspace app-workspace--editor-open'
+            : 'app-workspace'
+        }
+      >
+        <div className="app-workspace__workflow">
+          <WorkflowOverview
+            entities={entitiesQuery.data.entities}
+            isRefreshing={statusQuery.isRefetching || entitiesQuery.isRefetching}
+            movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
+            onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
+            onMoveEntity={(entity, phase, state) => void handleMoveEntity(entity, phase, state)}
+            onRefresh={() => void handleRefresh()}
+            onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}
+            status={statusQuery.data}
+            workflow={workflowQuery.data}
+          />
+        </div>
+        {modalState && usePanelEditor ? (
+          <div className="app-workspace__editor-slot" aria-hidden="true" />
+        ) : null}
+      </div>
 
       {modalState?.mode === 'create' ? (
         <EntityEditorModal
           initialPhase={modalState.phase}
           initialState={modalState.state}
           mode="create"
+          presentation={usePanelEditor ? 'panel' : 'modal'}
           workflow={workflowQuery.data}
           onClose={() => {
             setModalState(null)
@@ -157,6 +183,7 @@ export default function App() {
           initialPhase={modalState.summary.phase}
           initialState={modalState.summary.state}
           mode="edit"
+          presentation={usePanelEditor ? 'panel' : 'modal'}
           summary={modalState.summary}
           workflow={workflowQuery.data}
           onClose={() => {
