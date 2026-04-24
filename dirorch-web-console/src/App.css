@@ -332,6 +332,8 @@
 .state-card__transition-tag {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   gap: 0.35rem;
   width: 1.35rem;
   height: 1.35rem;
@@ -648,6 +650,7 @@
   flex-direction: column;
   gap: 1rem;
   min-height: 0;
+  overflow: auto;
   padding: 0 1.25rem;
   position: relative;
   z-index: 1;
@@ -946,12 +949,13 @@
 
 @media (min-width: 1280px) {
   .app-workspace {
-    --editor-panel-width: calc(min(1780px, calc(100vw - 1.25rem)) * 0.4);
+    --workspace-width: min(2200px, calc(100vw - 1.25rem));
+    --editor-panel-width: calc(var(--workspace-width) * 0.4);
     --workspace-gap: 1.5rem;
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(28rem, 2fr);
     gap: var(--workspace-gap);
-    width: min(1780px, calc(100vw - 1.25rem));
+    width: var(--workspace-width);
     margin: 0 auto;
     padding: 0 0.625rem;
     transition: grid-template-columns 260ms cubic-bezier(0.2, 0.85, 0.2, 1);
@@ -974,8 +978,8 @@
   }
 
   .entity-dialog--panel {
-    inset: 0.85rem calc((100vw - min(1780px, calc(100vw - 1.25rem))) / 2 + 0.625rem) 0.85rem auto;
-    width: calc(min(1780px, calc(100vw - 1.25rem)) * 0.4);
+    inset: 0.85rem calc((100vw - min(2200px, calc(100vw - 1.25rem))) / 2 + 0.625rem) 0.85rem auto;
+    width: calc(min(2200px, calc(100vw - 1.25rem)) * 0.4);
     max-width: calc(100vw - 1.25rem);
     margin: 0;
     border-radius: 0.18rem;
@@ -1099,7 +1103,19 @@
   }
 
   .dialog-content {
-    inset: 0.75rem;
+    inset: 0;
+    max-width: none;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .dialog-body {
+    overflow-y: auto;
+  }
+
+  .entity-dialog__layout,
+  .entity-form {
+    min-height: auto;
   }
 
   .dialog-header,
