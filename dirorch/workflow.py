@@ -552,8 +552,6 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
         return moved, jumps
 
     def _groups_for_entities(self, entities: list[Path]) -> list[Group]:
-        if self.config.mode == PHASE_MODE_PARALLEL:
-            return [Group(tuple(entities), "00")]
         return self._entities.group_entities(entities)
 
     async def _process_group(
@@ -610,6 +608,78 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                 transition.source,
                 self._configured_destination_state(transition),
                 entity_ids,
+            )
+
+
+class ParallelPhaseProcessor(PhaseProcessor):
+    """Processes every eligible phase entity concurrently until each comes to rest."""
+
+    async def _run(self) -> int:
+        moved_total = 0
+        while True:
+            entities = self._entities_for_pass()
+            if not entities:
+                return moved_total
+
+            tasks = [self._flow_entity_to_rest(entity) for entity in entities]
+            moves = await asyncio.gather(*tasks)
+            moved_this_pass = sum(moves)
+            moved_total += moved_this_pass
+            if moved_this_pass == 0:
+                return moved_total
+
+    def _entities_for_pass(self) -> list[Path]:
+        return [
+            entity
+            for entity in self._entities.list_phase_entities(self.config)
+            if not self._is_entity_locked(entity.name)
+            and not self._is_entity_paused(entity.name)
+        ]
+
+    async def _flow_entity_to_rest(self, entity: Path) -> int:
+        if not entity.exists():
+            return 0
+
+        moved = 0
+        current = entity
+        while True:
+            if self._is_entity_paused(current.name):
+                return moved
+            state_name = current.parent.name
+            transition = _find_transition_from_state(self.config, state_name)
+            if transition is None:
+                return moved
+
+            entity_ids = (current.name,)
+            self._execution_observer.transition_started(
+                self.config.name,
+                self.config.mode,
+                transition.source,
+                self._configured_destination_state(transition),
+                entity_ids,
+            )
+            try:
+                result = await self._process_entity(transition, current)
+            finally:
+                self._execution_observer.transition_finished(
+                    self.config.name,
+                    transition.source,
+                    self._configured_destination_state(transition),
+                    entity_ids,
+                )
+            if not result.moved:
+                return moved
+
+            moved += 1
+            assert result.destination_phase is not None
+            assert result.destination_state is not None
+            if result.jump_phase is not None:
+                raise WorkflowError("parallel mode does not support jumps")
+            if result.destination_phase != self.config.name:
+                return moved
+            current = (
+                self._entities.dir_for(result.destination_phase, result.destination_state)
+                / current.name
             )
 
 
@@ -725,7 +795,7 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
 
 PHASE_PROCESSOR_FOR_MODE = {
     PHASE_MODE_TRANSITIONS: AllAtOncePhaseProcessor,
-    PHASE_MODE_PARALLEL: AllAtOncePhaseProcessor,
+    PHASE_MODE_PARALLEL: ParallelPhaseProcessor,
     PHASE_MODE_ENTITY: OneAtATimePhaseProcessor,
 }
 

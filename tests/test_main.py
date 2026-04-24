@@ -217,6 +217,19 @@ phases:
         ),
         (
             """
+phases:
+  p:
+    mode: parallel
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        jump: p
+""",
+            "cannot define 'jump' in parallel mode",
+        ),
+        (
+            """
 init:
   cmd: "cat"
   stdin: 1
@@ -1681,9 +1694,9 @@ phases:
     assert elapsed < 0.55
 
 
-def test_parallel_mode_runs_each_transition_for_all_entities_concurrently(tmp_path: Path) -> None:
+def test_parallel_mode_entities_do_not_block_each_other(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
-    trace_file = tmp_path / "trace.log"
+    fast_done = tmp_path / "fast.done"
     _write(
         workflow,
         f"""
@@ -1695,32 +1708,32 @@ phases:
       - from: new
         to: mid
         cmd: >
-          sleep 0.2; echo "first-$(basename "$INPUT_ENTITY")" >> {trace_file}
+          if [ "$(basename "$INPUT_ENTITY")" = "slow.txt" ]; then
+            for _ in $(seq 1 40); do
+              [ -f {fast_done} ] && exit 0;
+              sleep 0.05;
+            done;
+            exit 7;
+          fi
       - from: mid
         to: done
         cmd: >
-          sleep 0.2; echo "second-$(basename "$INPUT_ENTITY")" >> {trace_file}
+          if [ "$(basename "$INPUT_ENTITY")" = "fast.txt" ]; then
+            touch {fast_done};
+          fi
 """,
     )
     new_dir = tmp_path / "tasks" / "new"
     new_dir.mkdir(parents=True)
-    for name in ["a.txt", "b.txt", "c.txt"]:
+    for name in ["fast.txt", "slow.txt"]:
         _write(new_dir / name, name)
 
-    started = time.monotonic()
     _run_workflow(workflow, tmp_path)
-    elapsed = time.monotonic() - started
 
-    assert sorted(trace_file.read_text(encoding="utf-8").splitlines()) == [
-        "first-a.txt",
-        "first-b.txt",
-        "first-c.txt",
-        "second-a.txt",
-        "second-b.txt",
-        "second-c.txt",
-    ]
-    # Two transition barriers at ~0.2s each, plus process overhead.
-    assert elapsed < 0.8
+    assert fast_done.exists()
+    assert (tmp_path / "tasks" / "done" / "fast.txt").exists()
+    assert (tmp_path / "tasks" / "done" / "slow.txt").exists()
+    assert not (tmp_path / "tasks" / FAILED_STATE / "slow.txt").exists()
 
 
 def test_parallel_dynamic_selectors_do_not_cross_talk(tmp_path: Path) -> None:

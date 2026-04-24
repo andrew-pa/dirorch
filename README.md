@@ -201,7 +201,7 @@ Phase fields:
 - `states` (required): non-empty list of state names
 - `mode` (optional): phase execution strategy
   - `transitions` (default): process each transition rule across all applicable entities
-  - `parallel`: process each transition rule across all applicable entities, always running each transition batch concurrently
+  - `parallel`: process all eligible phase entities concurrently, with each entity flowing independently until no transition applies
   - `entity`: process one entity through transitions until no transition applies, then next entity
 - `cwd` (optional): phase default working directory for hook commands; overrides workflow `cwd`
 - `transitions` (optional): list of transition definitions
@@ -375,8 +375,10 @@ Phase `mode` behavior:
   - Dirorch applies each transition rule to all matching entities, looping until fixpoint.
   - Grouped concurrency (`NN-name.ext`) is enabled in this mode.
 - `parallel` mode:
-  - Dirorch applies each transition rule to all matching entities, looping until fixpoint.
-  - Every eligible entity for the active transition runs in the same concurrent batch, regardless of filename.
+  - Dirorch starts all eligible phase entities concurrently.
+  - Each entity moves through applicable transitions independently until it reaches a state with no transition.
+  - One entity's slow or blocked hook does not prevent other entities from continuing through later transitions.
+  - `jump` is not allowed on transitions in `parallel` mode phases.
 - `entity` mode:
   - Dirorch picks entities by filename, moves each entity through transitions until it comes to rest, then picks the next entity.
   - Jumps still run immediately after a successful transition with `jump`.

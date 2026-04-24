@@ -330,6 +330,7 @@ Per-phase fields:
 - `name: string`
 - `mode: string`
   Supported values currently include `transitions`, `parallel`, and `entity`.
+  In `parallel` mode, all eligible phase entities process concurrently and `jump` transitions are rejected.
 - `cwd: string | null`
 - `states: array<string>`
 - `reserved_states: array<string>`

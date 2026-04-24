@@ -313,6 +313,7 @@ def _validate_workflow(phases: tuple[PhaseConfig, ...]) -> None:
     for phase in phases:
         states = set(phase.states)
         for transition in phase.transitions:
+            transition_label = f"{transition.source}->{transition.destination.display_name}"
             if transition.source not in states:
                 raise WorkflowError(
                     f"Phase '{phase.name}' transition source '{transition.source}' is not a phase state"
@@ -323,6 +324,10 @@ def _validate_workflow(phases: tuple[PhaseConfig, ...]) -> None:
             ):
                 raise WorkflowError(
                     f"Phase '{phase.name}' transition destination '{transition.destination.constant}' is not a phase state"
+                )
+            if phase.mode == PHASE_MODE_PARALLEL and transition.jump_target is not None:
+                raise WorkflowError(
+                    f"Phase '{phase.name}' transition '{transition_label}' cannot define 'jump' in parallel mode"
                 )
             if (
                 transition.jump_target is not None
