@@ -625,6 +625,12 @@
   animation: modal-enter 220ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
 }
 
+.dialog-content.entity-dialog--fullscreen-child {
+  overflow: visible;
+  transform: none;
+  animation: none;
+}
+
 .entity-dialog {
   max-width: min(1500px, calc(100vw - 3rem));
   margin: auto;
@@ -796,6 +802,43 @@
     linear-gradient(180deg, rgba(17, 25, 37, 0.98), rgba(9, 14, 22, 0.98));
 }
 
+.linked-file-panel--fullscreen,
+.entity-log-viewer--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  border: 1px solid rgba(69, 232, 255, 0.22);
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 82% 0%, rgba(69, 232, 255, 0.14), transparent 32rem),
+    radial-gradient(circle at 0% 100%, rgba(24, 118, 144, 0.16), transparent 34rem),
+    linear-gradient(180deg, rgba(15, 23, 34, 0.99), rgba(6, 11, 18, 0.99));
+  box-shadow: none;
+  animation: modal-enter 180ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
+}
+
+.linked-file-panel--fullscreen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  height: auto;
+  min-height: 100dvh;
+  padding: clamp(0.9rem, 2vw, 1.6rem);
+  overflow: hidden;
+}
+
+.linked-file-panel--fullscreen .document-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.linked-file-panel--fullscreen .editor-surface {
+  flex: 1;
+  min-height: 0;
+}
+
 .linked-file-panel__path {
   margin-top: 0.15rem;
 }
@@ -831,11 +874,20 @@
   min-height: 0;
 }
 
+.entity-log-viewer--fullscreen {
+  min-height: 100dvh;
+  padding: clamp(0.9rem, 2vw, 1.6rem);
+}
+
 .entity-log-viewer__header,
 .entity-log-viewer__status {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.entity-log-viewer__header {
+  justify-content: space-between;
 }
 
 .entity-log-viewer__status {
@@ -859,6 +911,19 @@
   width: 100%;
   min-height: 20rem;
   padding: 0.75rem 0.6rem;
+}
+
+.entity-log-viewer--fullscreen .entity-log-viewer__body,
+.entity-log-viewer--fullscreen .entity-log-viewer__terminal {
+  min-height: 0;
+}
+
+.entity-log-viewer--fullscreen .entity-log-viewer__body {
+  flex: 1;
+}
+
+.entity-log-viewer--fullscreen .entity-log-viewer__terminal {
+  height: 100%;
 }
 
 .entity-log-viewer__terminal .xterm,

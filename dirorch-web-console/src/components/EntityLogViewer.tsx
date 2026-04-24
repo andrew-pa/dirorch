@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { LoaderCircle, Radio, WifiOff } from 'lucide-react'
+import clsx from 'clsx'
+import { LoaderCircle, Maximize2, Minimize2, Radio, WifiOff } from 'lucide-react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
@@ -15,12 +16,20 @@ import { EmptyState } from './ui/EmptyState'
 
 interface EntityLogViewerProps {
   entityId: string
+  fullscreen?: boolean
+  onCloseFullscreen?: () => void
+  onOpenFullscreen?: () => void
 }
 
 type SnapshotState = 'loading' | 'ready' | 'error'
 type ConnectionState = 'connecting' | 'live' | 'disconnected'
 
-export function EntityLogViewer({ entityId }: EntityLogViewerProps) {
+export function EntityLogViewer({
+  entityId,
+  fullscreen = false,
+  onCloseFullscreen,
+  onOpenFullscreen,
+}: EntityLogViewerProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const autoFollowRef = useRef(true)
@@ -222,7 +231,7 @@ export function EntityLogViewer({ entityId }: EntityLogViewerProps) {
   }, [entityId])
 
   return (
-    <section className="entity-log-viewer">
+    <section className={clsx('entity-log-viewer', fullscreen && 'entity-log-viewer--fullscreen')}>
       <header className="entity-log-viewer__header">
         <div className="entity-log-viewer__status">
           <span
@@ -253,6 +262,25 @@ export function EntityLogViewer({ entityId }: EntityLogViewerProps) {
             {autoFollow ? 'Following output' : 'Scroll locked'}
           </span>
         </div>
+        {fullscreen ? (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Exit fullscreen log viewer"
+            onClick={onCloseFullscreen}
+          >
+            <Minimize2 size={16} />
+          </button>
+        ) : onOpenFullscreen ? (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Open log viewer fullscreen"
+            onClick={onOpenFullscreen}
+          >
+            <Maximize2 size={16} />
+          </button>
+        ) : null}
       </header>
 
       <div className="entity-log-viewer__body">

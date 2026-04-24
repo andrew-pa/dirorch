@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FilePenLine, FilePlus2, LoaderCircle, Save } from 'lucide-react'
+import { FilePenLine, FilePlus2, LoaderCircle, Maximize2, Minimize2, Save } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
@@ -18,6 +18,9 @@ import { SectionHeader } from './ui/SectionHeader'
 import { Surface } from './ui/Surface'
 
 interface LinkedFileEditorProps {
+  fullscreen?: boolean
+  onCloseFullscreen?: () => void
+  onOpenFullscreen?: () => void
   path: string
   readOnly?: boolean
 }
@@ -28,7 +31,13 @@ interface FileDraft {
   editorMode: 'raw' | 'structured'
 }
 
-export function LinkedFileEditor({ path, readOnly = false }: LinkedFileEditorProps) {
+export function LinkedFileEditor({
+  fullscreen = false,
+  onCloseFullscreen,
+  onOpenFullscreen,
+  path,
+  readOnly = false,
+}: LinkedFileEditorProps) {
   const queryClient = useQueryClient()
   const fileQuery = useQuery({
     queryKey: queryKeys.file(path),
@@ -128,20 +137,45 @@ export function LinkedFileEditor({ path, readOnly = false }: LinkedFileEditorPro
       : loadedFile.format !== draft.format || loadedFile.content !== draft.rawContent
 
   return (
-    <Surface as="aside" className="linked-file-panel" padding="none">
+    <Surface
+      as="aside"
+      className={clsx('linked-file-panel', fullscreen && 'linked-file-panel--fullscreen')}
+      padding="none"
+    >
       <SectionHeader
         className="linked-file-panel__header"
         eyebrow="Referenced file"
         title={<div className="linked-file-panel__path">{path}</div>}
         actions={
-          <span
-            className={clsx(
-              'status-pill',
-              fileExists ? 'status-pill--success' : 'status-pill--neutral',
-            )}
-          >
-            {fileExists ? 'Existing' : 'Missing'}
-          </span>
+          <>
+            <span
+              className={clsx(
+                'status-pill',
+                fileExists ? 'status-pill--success' : 'status-pill--neutral',
+              )}
+            >
+              {fileExists ? 'Existing' : 'Missing'}
+            </span>
+            {fullscreen ? (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Exit fullscreen referenced file editor"
+                onClick={onCloseFullscreen}
+              >
+                <Minimize2 size={16} />
+              </button>
+            ) : onOpenFullscreen ? (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Open referenced file editor fullscreen"
+                onClick={onOpenFullscreen}
+              >
+                <Maximize2 size={16} />
+              </button>
+            ) : null}
+          </>
         }
       />
 
@@ -157,7 +191,7 @@ export function LinkedFileEditor({ path, readOnly = false }: LinkedFileEditorPro
             format={draft.format}
             editorMode={draft.editorMode}
             rawContent={draft.rawContent}
-            height="24rem"
+            height={fullscreen ? 'calc(100dvh - 15rem)' : '24rem'}
             readOnly={readOnly}
             onFormatChange={(nextFormat) => {
               setDraft((current) => ({

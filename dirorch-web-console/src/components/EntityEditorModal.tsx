@@ -99,6 +99,7 @@ export function EntityEditorModal({
     mode === 'create' ? 'ready' : 'idle',
   )
   const [activeTab, setActiveTab] = useState<'content' | 'logs'>('content')
+  const [fullscreenPane, setFullscreenPane] = useState<'file' | 'logs' | null>(null)
 
   const loadedEntityRef = useRef<EntityDetail | null>(null)
   const ownedLockRef = useRef(false)
@@ -114,6 +115,7 @@ export function EntityEditorModal({
     setIsEditing(true)
     setLockState('ready')
     setActiveTab('content')
+    setFullscreenPane(null)
     setDraft({
       ...EMPTY_DRAFT,
       phase: initialPhase,
@@ -123,6 +125,7 @@ export function EntityEditorModal({
 
   useEffect(() => {
     setActiveTab('content')
+    setFullscreenPane(null)
   }, [entityId, mode])
 
   useEffect(() => {
@@ -206,6 +209,12 @@ export function EntityEditorModal({
         .then(() => invalidateConsoleQueries(queryClient, entityId))
     }
   }, [entityId, mode, queryClient])
+
+  useEffect(() => {
+    if (!selectedFilePath && fullscreenPane === 'file') {
+      setFullscreenPane(null)
+    }
+  }, [fullscreenPane, selectedFilePath])
 
   useEffect(() => {
     const parsedJson =
@@ -382,6 +391,7 @@ export function EntityEditorModal({
           className={clsx(
             'surface surface--padding-none surface--radius-xl dialog-content entity-dialog',
             presentation === 'panel' && 'entity-dialog--panel',
+            fullscreenPane && 'entity-dialog--fullscreen-child',
           )}
         >
           <SectionHeader
@@ -485,7 +495,12 @@ export function EntityEditorModal({
             <>
               <div className="dialog-body">
                 {activeTab === 'logs' && mode === 'edit' && entityId ? (
-                  <EntityLogViewer entityId={entityId} />
+                  <EntityLogViewer
+                    entityId={entityId}
+                    fullscreen={fullscreenPane === 'logs'}
+                    onCloseFullscreen={() => setFullscreenPane(null)}
+                    onOpenFullscreen={() => setFullscreenPane('logs')}
+                  />
                 ) : (
                   <div className="entity-dialog__layout">
                     <section className="entity-form">
@@ -627,7 +642,13 @@ export function EntityEditorModal({
                     {selectedFilePath || presentation !== 'panel' ? (
                       <section className="entity-dialog__side">
                         {selectedFilePath ? (
-                          <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
+                          <LinkedFileEditor
+                            path={selectedFilePath}
+                            readOnly={readOnly}
+                            fullscreen={fullscreenPane === 'file'}
+                            onCloseFullscreen={() => setFullscreenPane(null)}
+                            onOpenFullscreen={() => setFullscreenPane('file')}
+                          />
                         ) : (
                           <EmptyState className="panel-placeholder" icon={<Plus size={16} />}>
                             No linked file selected
