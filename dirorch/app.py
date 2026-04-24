@@ -187,6 +187,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             template_env=template_env,
             retries=retries,
             logger=logger,
+            cwd=config.cwd,
             entity_log_emitter=entity_log_emitter,
             is_entity_paused=pauses.is_paused,
             command_registry=command_registry,

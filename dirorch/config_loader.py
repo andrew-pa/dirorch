@@ -38,6 +38,7 @@ def load_workflow(path: Path) -> WorkflowConfig:
 
     environment = _load_environment(payload)
     retries = _load_retries(payload)
+    cwd = _parse_optional_cwd(payload, "Workflow")
     init = _parse_optional_hook(payload, "init")
     phases = _parse_phases(raw_phases)
     _validate_workflow(phases)
@@ -47,6 +48,7 @@ def load_workflow(path: Path) -> WorkflowConfig:
         environment=environment,
         retries=retries,
         init=init,
+        cwd=cwd,
     )
 
 
@@ -87,6 +89,15 @@ def _parse_optional_hook(payload: dict[str, Any], field_name: str) -> HookConfig
         raise WorkflowError(f"'{field_name}' must be a string or a mapping with 'cmd'")
     except WorkflowError as exc:
         raise WorkflowError(f"'{field_name}' hook {exc}") from exc
+
+
+def _parse_optional_cwd(payload: dict[str, Any], label: str) -> str | None:
+    cwd = payload.get("cwd")
+    if cwd is None:
+        return None
+    if not isinstance(cwd, str) or not cwd.strip():
+        raise WorkflowError(f"{label} has invalid 'cwd'")
+    return cwd
 
 
 def _parse_named_target(
@@ -137,6 +148,7 @@ def _parse_phases(raw_phases: dict[str, Any]) -> tuple[PhaseConfig, ...]:
         transitions = _parse_transitions(phase_name, raw_phase)
         completions = _parse_completions(phase_name, raw_phase)
         mode = _parse_phase_mode(phase_name, raw_phase)
+        cwd = _parse_optional_cwd(raw_phase, f"Phase '{phase_name}'")
 
         phases.append(
             PhaseConfig(
@@ -145,6 +157,7 @@ def _parse_phases(raw_phases: dict[str, Any]) -> tuple[PhaseConfig, ...]:
                 transitions=transitions,
                 completions=completions,
                 mode=mode,
+                cwd=cwd,
             )
         )
     return tuple(phases)
@@ -191,6 +204,7 @@ def _parse_transitions(
         source = item.get("from")
         cmd = item.get("cmd")
         stdin = item.get("stdin")
+        cwd = item.get("cwd")
 
         if not isinstance(source, str) or not source:
             raise WorkflowError(
@@ -225,6 +239,15 @@ def _parse_transitions(
             raise WorkflowError(
                 f"Phase '{phase_name}' transition '{transition_label}' requires 'cmd' when 'stdin' is set"
             )
+        if cwd is not None:
+            if cmd is None:
+                raise WorkflowError(
+                    f"Phase '{phase_name}' transition '{transition_label}' requires 'cmd' when 'cwd' is set"
+                )
+            if not isinstance(cwd, str) or not cwd.strip():
+                raise WorkflowError(
+                    f"Phase '{phase_name}' transition '{transition_label}' has invalid 'cwd'"
+                )
 
         transitions.append(
             TransitionConfig(
@@ -232,6 +255,7 @@ def _parse_transitions(
                 destination=destination,
                 cmd=cmd,
                 stdin=stdin,
+                cwd=cwd,
                 jump_target=jump_target,
             )
         )
@@ -314,9 +338,11 @@ def _parse_hook(raw_hook: Any) -> HookConfig:
     if isinstance(raw_hook, str):
         cmd = raw_hook
         stdin = None
+        cwd = None
     elif isinstance(raw_hook, dict):
         cmd = raw_hook.get("cmd")
         stdin = raw_hook.get("stdin")
+        cwd = raw_hook.get("cwd")
     else:
         raise ValueError("hook must be string or mapping")
 
@@ -324,4 +350,6 @@ def _parse_hook(raw_hook: Any) -> HookConfig:
         raise WorkflowError("has invalid 'cmd'")
     if stdin is not None and not isinstance(stdin, str):
         raise WorkflowError("has invalid 'stdin'")
-    return HookConfig(cmd=cmd, stdin=stdin)
+    if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
+        raise WorkflowError("has invalid 'cwd'")
+    return HookConfig(cmd=cmd, stdin=stdin, cwd=cwd)

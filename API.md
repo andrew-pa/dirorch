@@ -292,11 +292,13 @@ Response `200`:
   "phase_order": ["tasks"],
   "environment": {},
   "retries": 3,
+  "cwd": null,
   "init": null,
   "phases": [
     {
       "name": "tasks",
       "mode": "transitions",
+      "cwd": null,
       "states": ["new", "done"],
       "reserved_states": ["_failed"],
       "transitions": [
@@ -304,6 +306,7 @@ Response `200`:
           "from": "new",
           "to": "done",
           "cmd": null,
+          "cwd": null,
           "jump": null
         }
       ],
@@ -318,6 +321,7 @@ Fields:
 - `phase_order: array<string>`
 - `environment: object`
 - `retries: integer`
+- `cwd: string | null`
 - `init: object | null`
 - `phases: array<object>`
 
@@ -326,6 +330,7 @@ Per-phase fields:
 - `name: string`
 - `mode: string`
   Supported values currently include `transitions`, `parallel`, and `entity`.
+- `cwd: string | null`
 - `states: array<string>`
 - `reserved_states: array<string>`
 - `transitions: array<object>`
@@ -334,16 +339,18 @@ Per-phase fields:
 Transition fields:
 
 - `from: string`
-- `to: string | { cmd: string, stdin: string | null }`
+- `to: string | { cmd: string, stdin: string | null, cwd: string | null }`
 - `cmd: string | null`
-- `jump: string | { cmd: string, stdin: string | null } | null`
+- `cwd: string | null`
+- `jump: string | { cmd: string, stdin: string | null, cwd: string | null } | null`
 
 Completion/init hook fields:
 
 - `cmd: string`
 - `stdin: string | null`
+- `cwd: string | null`
 
-Hook `cmd` and `stdin` values are rendered as Jinja2 templates before execution.
+Hook `cmd`, `stdin`, and `cwd` values are rendered as Jinja2 templates before execution. Relative `cwd` values resolve under `--root`, with precedence: hook `cwd`, phase `cwd`, workflow `cwd`, then `--root`.
 
 Dynamic target semantics:
 

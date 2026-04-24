@@ -737,10 +737,17 @@ function TransitionTooltipContent({
         {transition.from} {'->'} {targetLabel(transition.to)}
       </div>
       <div>cmd: {transition.cmd ?? 'implicit move'}</div>
+      {transition.cwd ? <div>cwd: {transition.cwd}</div> : null}
       {typeof transition.to === 'string' ? null : <div>to selector: {transition.to.cmd}</div>}
+      {typeof transition.to === 'string' || transition.to.cwd === null ? null : (
+        <div>to cwd: {transition.to.cwd}</div>
+      )}
       <div>jump: {transition.jump === null ? 'none' : targetLabel(transition.jump)}</div>
       {transition.jump && typeof transition.jump !== 'string' ? (
         <div>jump selector: {transition.jump.cmd}</div>
+      ) : null}
+      {transition.jump && typeof transition.jump !== 'string' && transition.jump.cwd ? (
+        <div>jump cwd: {transition.jump.cwd}</div>
       ) : null}
     </div>
   )

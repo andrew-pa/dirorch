@@ -24,6 +24,7 @@ class HookRunnerConfig:
     template_env: dict[str, str]
     retries: int
     logger: logging.Logger
+    cwd: str | None = None
     entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
     is_entity_paused: Callable[[str], bool] = lambda _entity_id: False
     command_registry: ActiveShellCommandRegistry | None = None
@@ -64,6 +65,7 @@ class HookRunner:
         self._template_env = config.template_env
         self._retries = config.retries
         self._logger = config.logger
+        self._cwd = config.cwd
         self._entity_log_emitter = config.entity_log_emitter
         self._is_entity_paused = config.is_entity_paused
         self._command_registry = config.command_registry
@@ -75,6 +77,7 @@ class HookRunner:
         extra_env: dict[str, str],
         context: str,
         *,
+        cwd: str | None = None,
         execution_context: HookExecutionContext | None = None,
     ) -> bool:
         return (
@@ -82,6 +85,7 @@ class HookRunner:
                 hook,
                 extra_env,
                 context,
+                cwd=cwd,
                 execution_context=execution_context,
             )
         ).succeeded
@@ -92,6 +96,7 @@ class HookRunner:
         extra_env: dict[str, str],
         context: str,
         *,
+        cwd: str | None = None,
         capture_selector_output: bool = False,
         execution_context: HookExecutionContext | None = None,
     ) -> CommandResult:
@@ -171,10 +176,37 @@ class HookRunner:
                             reason=f"stdin template error: {exc}",
                         )
                     continue
+                try:
+                    rendered_cwd = self._render_cwd(hook, cwd, template_env)
+                except TemplateRenderError as exc:
+                    last_exit_code = None
+                    await self._emit_command_finished(
+                        rendered_cmd,
+                        attempt,
+                        execution_context,
+                        exit_code=None,
+                        error=f"cwd template error: {exc}",
+                    )
+                    self._logger.warning(
+                        "%s failed (attempt %d/%d): cwd template error: %s",
+                        context,
+                        attempt,
+                        attempts,
+                        exc,
+                    )
+                    if attempt < attempts:
+                        await self._emit_command_retrying(
+                            attempt,
+                            attempts,
+                            execution_context,
+                            reason=f"cwd template error: {exc}",
+                        )
+                    continue
                 result = await self._run_once(
                     rendered_cmd,
                     stdin_payload,
                     env,
+                    cwd=rendered_cwd,
                     selector_pipe=selector_pipe,
                     attempt=attempt,
                     execution_context=execution_context,
@@ -237,25 +269,50 @@ class HookRunner:
             return None
         return self._template_renderer.render(hook.stdin, env_vars)
 
+    def _render_cwd(
+        self,
+        hook: HookConfig,
+        default_cwd: str | None,
+        env_vars: dict[str, str],
+    ) -> Path:
+        raw_cwd = hook.cwd if hook.cwd is not None else default_cwd
+        raw_cwd = self._cwd if raw_cwd is None else raw_cwd
+        if raw_cwd is None:
+            return self._root
+        rendered = self._template_renderer.render(raw_cwd, env_vars)
+        path = Path(rendered).expanduser()
+        if path.is_absolute():
+            return path
+        return self._root / path
+
     async def _run_once(
         self,
         cmd: str,
         stdin_payload: str | None,
         env: dict[str, str],
         *,
+        cwd: Path,
         selector_pipe: SelectorPipe | None,
         attempt: int,
         execution_context: HookExecutionContext | None,
     ) -> CommandResult:
-        process = await asyncio.create_subprocess_shell(
-            cmd,
-            cwd=str(self._root),
-            env=env,
-            stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
+        try:
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                cwd=str(cwd),
+                env=env,
+                stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            self._logger.warning("Failed to start command in cwd '%s': %s", cwd, exc)
+            return CommandResult(
+                succeeded=False,
+                exit_code=None,
+                attempts_used=attempt,
+            )
         registration = await self._register_process(execution_context, process)
 
         assert process.stdout is not None

@@ -64,13 +64,17 @@ env:
   FOO: bar
 init:
   cmd: "echo init"
+  cwd: init-dir
 phases:
   tasks:
     mode: entity
+    cwd: phase-dir
     states: [new, done]
     transitions:
       - from: new
         to: done
+        cmd: "echo transition"
+        cwd: transition-dir
 """,
     )
 
@@ -83,6 +87,10 @@ phases:
     assert config.phases[0].mode == "entity"
     assert config.init is not None
     assert config.init.cmd == "echo init"
+    assert config.init.cwd == "init-dir"
+    assert config.cwd is None
+    assert config.phases[0].cwd == "phase-dir"
+    assert config.phases[0].transitions[0].cwd == "transition-dir"
 
 
 def test_load_workflow_accepts_dynamic_transition_targets(tmp_path: Path) -> None:
@@ -98,8 +106,10 @@ phases:
         to:
           cmd: "printf '%s\\n' review > \\\"$DIRORCH_SELECTOR_PIPE\\\""
           stdin: "{{ INPUT_ENTITY }}"
+          cwd: selector-dir
         jump:
           cmd: "printf '%s\\n' audit > \\\"$DIRORCH_SELECTOR_PIPE\\\""
+          cwd: jump-dir
   audit:
     states: [new, done]
 """,
@@ -112,9 +122,11 @@ phases:
     assert transition.destination.hook is not None
     assert transition.destination.hook.cmd == "printf '%s\n' review > \"$DIRORCH_SELECTOR_PIPE\""
     assert transition.destination.hook.stdin == "{{ INPUT_ENTITY }}"
+    assert transition.destination.hook.cwd == "selector-dir"
     assert transition.jump_target is not None
     assert transition.jump_target.hook is not None
     assert transition.jump_target.hook.cmd == "printf '%s\n' audit > \"$DIRORCH_SELECTOR_PIPE\""
+    assert transition.jump_target.hook.cwd == "jump-dir"
 
 
 @pytest.mark.parametrize(
@@ -152,6 +164,47 @@ phases:
     states: [new]
 """,
             "'init' must be a string or a mapping with 'cmd'",
+        ),
+        (
+            """
+cwd: []
+phases:
+  p:
+    states: [new]
+""",
+            "Workflow has invalid 'cwd'",
+        ),
+        (
+            """
+phases:
+  p:
+    cwd: []
+    states: [new]
+""",
+            "Phase 'p' has invalid 'cwd'",
+        ),
+        (
+            """
+init:
+  cmd: "pwd"
+  cwd: []
+phases:
+  p:
+    states: [new]
+""",
+            "hook has invalid 'cwd'",
+        ),
+        (
+            """
+phases:
+  p:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cwd: work
+""",
+            "requires 'cmd' when 'cwd' is set",
         ),
         (
             """
@@ -584,6 +637,65 @@ phases:
     input_entity, done_dir = content.split("|", maxsplit=1)
     assert Path(input_entity) == entity.resolve()
     assert Path(done_dir) == (tmp_path / "tasks" / "done").resolve()
+
+
+def test_hook_cwd_resolution_prefers_hook_then_phase_then_workflow(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    global_dir = tmp_path / "global-dir"
+    phase_dir = tmp_path / "phase-dir"
+    hook_dir = tmp_path / "hook-dir"
+    selector_dir = tmp_path / "selector-dir"
+    for directory in (global_dir, phase_dir, hook_dir, selector_dir):
+        directory.mkdir()
+
+    init_out = tmp_path / "init.cwd"
+    transition_phase_out = tmp_path / "transition-phase.cwd"
+    selector_out = tmp_path / "selector.cwd"
+    transition_hook_out = tmp_path / "transition-hook.cwd"
+    completion_phase_out = tmp_path / "completion-phase.cwd"
+    completion_global_out = tmp_path / "completion-global.cwd"
+    _write(
+        workflow,
+        f"""
+cwd: global-dir
+init:
+  cmd: "pwd > {init_out}"
+phases:
+  tasks:
+    cwd: phase-dir
+    states: [new, done, final]
+    transitions:
+      - from: new
+        to:
+          cmd: "pwd > {selector_out}; printf '%s\\n' done > \\"$DIRORCH_SELECTOR_PIPE\\""
+          cwd: selector-dir
+        cmd: "pwd > {transition_phase_out}"
+      - from: done
+        to: final
+        cmd: "pwd > {transition_hook_out}"
+        cwd: hook-dir
+    completions:
+      - cmd: "pwd > {completion_phase_out}"
+  audit:
+    states: [idle]
+    completions:
+      - cmd: "pwd > {completion_global_out}"
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "x.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert init_out.read_text(encoding="utf-8").strip() == str(global_dir)
+    assert transition_phase_out.read_text(encoding="utf-8").strip() == str(phase_dir)
+    assert selector_out.read_text(encoding="utf-8").strip() == str(selector_dir)
+    assert transition_hook_out.read_text(encoding="utf-8").strip() == str(hook_dir)
+    assert completion_phase_out.read_text(encoding="utf-8").strip() == str(phase_dir)
+    assert completion_global_out.read_text(encoding="utf-8").strip() == str(global_dir)
 
 
 def test_transition_hook_stdin_template_renders_vars_and_file(tmp_path: Path) -> None:

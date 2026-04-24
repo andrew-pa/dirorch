@@ -12,12 +12,14 @@ export interface TransitionDefinition {
   from: string
   to: NamedTargetDefinition
   cmd: string | null
+  cwd: string | null
   jump: NamedTargetDefinition | null
 }
 
 export interface CompletionHook {
   cmd: string
   stdin: string | null
+  cwd: string | null
 }
 
 export type NamedTargetDefinition = string | CompletionHook
@@ -25,6 +27,7 @@ export type NamedTargetDefinition = string | CompletionHook
 export interface PhaseDefinition {
   name: string
   mode: string
+  cwd: string | null
   states: string[]
   reserved_states: string[]
   transitions: TransitionDefinition[]
@@ -35,6 +38,7 @@ export interface WorkflowDefinition {
   phase_order: string[]
   environment: Record<string, string>
   retries: number
+  cwd: string | null
   init: CompletionHook | null
   phases: PhaseDefinition[]
 }

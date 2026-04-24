@@ -193,6 +193,7 @@ Top-level fields:
 - `phases` (required): mapping of phase name -> phase definition
 - `retries` (optional): non-negative integer, default `3`
 - `env` or `environment` (optional): map of string env vars passed to hooks; values are Jinja2 templates rendered at startup
+- `cwd` (optional): default working directory for hook commands; relative paths resolve under `--root`
 - `init` (optional): one-time startup hook before any phase runs
 
 Phase fields:
@@ -202,6 +203,7 @@ Phase fields:
   - `transitions` (default): process each transition rule across all applicable entities
   - `parallel`: process each transition rule across all applicable entities, always running each transition batch concurrently
   - `entity`: process one entity through transitions until no transition applies, then next entity
+- `cwd` (optional): phase default working directory for hook commands; overrides workflow `cwd`
 - `transitions` (optional): list of transition definitions
 - `completions` (optional): list of completion hook definitions
   - `completion` is also accepted as alias
@@ -212,6 +214,7 @@ Transition fields:
 - `to` (required): either a destination state string or a hook object with `cmd` and optional `stdin`
 - `cmd` (optional): shell command to run before move
 - `stdin` (optional): text rendered and piped to the hook process stdin (requires `cmd`)
+- `cwd` (optional): working directory for this transition command; requires `cmd` and overrides phase/workflow `cwd`
 - `jump` (optional): either a target phase string or a hook object with `cmd` and optional `stdin`
 
 Completion hook fields:
@@ -223,6 +226,9 @@ Completion hook fields:
   - optional `stdin`:
     - `- cmd: "cat > out.txt"`
     - `  stdin: "hello {{ MY_VAR }}"`
+  - optional `cwd`:
+    - `- cmd: "pwd > out.txt"`
+    - `  cwd: "scripts"`
 
 Init hook fields:
 
@@ -232,6 +238,8 @@ Init hook fields:
   - `init: { cmd: "echo setup" }`
   - optional `stdin`:
     - `init: { cmd: "cat > setup.txt", stdin: "seed={{ APP_SEED }}" }`
+  - optional `cwd`:
+    - `init: { cmd: "pwd > setup-dir.txt", cwd: "setup" }`
 
 Reserved state:
 
@@ -257,6 +265,15 @@ All hooks also receive:
 - current process environment
 - values from YAML `env`/`environment`
 
+Hook working directory precedence:
+
+- hook `cwd`
+- phase `cwd`
+- workflow `cwd`
+- `--root`
+
+Relative `cwd` values are resolved under `--root`.
+
 Workflow `env` template context includes:
 
 - other already-resolved workflow env vars
@@ -273,7 +290,7 @@ Workflow env templates and hook `cmd`/`stdin` templates can also use standard Ji
 ## Hook Templates
 
 If a hook defines `cmd` or `stdin`, Dirorch renders it with Jinja2 before running the command.
-This applies to transition side-effect hooks, completion hooks, init hooks, and dynamic `to`/`jump` selector hooks.
+This applies to transition side-effect hooks, completion hooks, init hooks, dynamic `to`/`jump` selector hooks, and `cwd` values at all scopes.
 
 Template context includes only Dirorch-defined variables:
 

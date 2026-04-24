@@ -48,6 +48,7 @@ class WorkflowDefinitionService:
                 {
                     "name": phase.name,
                     "mode": phase.mode,
+                    "cwd": phase.cwd,
                     "states": [*phase.states],
                     "reserved_states": ["_failed"],
                     "transitions": [
@@ -55,6 +56,7 @@ class WorkflowDefinitionService:
                             "from": transition.source,
                             "to": self._serialize_named_target(transition.destination),
                             "cmd": transition.cmd,
+                            "cwd": transition.cwd,
                             "jump": None
                             if transition.jump_target is None
                             else self._serialize_named_target(transition.jump_target),
@@ -62,7 +64,7 @@ class WorkflowDefinitionService:
                         for transition in phase.transitions
                     ],
                     "completions": [
-                        {"cmd": hook.cmd, "stdin": hook.stdin}
+                        {"cmd": hook.cmd, "stdin": hook.stdin, "cwd": hook.cwd}
                         for hook in phase.completions
                     ],
                 }
@@ -71,17 +73,29 @@ class WorkflowDefinitionService:
             "phase_order": list(self._config.phase_order),
             "environment": self._config.environment,
             "retries": self._config.retries,
+            "cwd": self._config.cwd,
             "init": None
             if self._config.init is None
-            else {"cmd": self._config.init.cmd, "stdin": self._config.init.stdin},
+            else {
+                "cmd": self._config.init.cmd,
+                "stdin": self._config.init.stdin,
+                "cwd": self._config.init.cwd,
+            },
             "phases": phases,
         }
 
-    def _serialize_named_target(self, target: NamedTargetConfig) -> str | dict[str, str | None]:
+    def _serialize_named_target(
+        self,
+        target: NamedTargetConfig,
+    ) -> str | dict[str, str | None]:
         if target.constant is not None:
             return target.constant
         assert target.hook is not None
-        return {"cmd": target.hook.cmd, "stdin": target.hook.stdin}
+        return {
+            "cmd": target.hook.cmd,
+            "stdin": target.hook.stdin,
+            "cwd": target.hook.cwd,
+        }
 
 
 class EntityAdminService:

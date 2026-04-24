@@ -14,6 +14,7 @@ from .constants import (
 class HookConfig:
     cmd: str
     stdin: str | None = None
+    cwd: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class TransitionConfig:
     destination: NamedTargetConfig
     cmd: str | None = None
     stdin: str | None = None
+    cwd: str | None = None
     jump_target: NamedTargetConfig | None = None
 
 
@@ -52,6 +54,7 @@ class PhaseConfig:
     transitions: tuple[TransitionConfig, ...]
     completions: tuple[HookConfig, ...]
     mode: str = PHASE_MODE_TRANSITIONS
+    cwd: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,7 @@ class WorkflowConfig:
     environment: dict[str, str]
     retries: int
     init: HookConfig | None
+    cwd: str | None = None
 
     @property
     def phase_order(self) -> tuple[str, ...]:

@@ -102,7 +102,12 @@ class PhaseProcessor:
             self._logger.info("Running %s", context)
             self._execution_observer.completion_started(self.config.name, index)
             try:
-                success = await self._hook_runner.run(hook, {}, context)
+                success = await self._hook_runner.run(
+                    hook,
+                    {},
+                    context,
+                    cwd=self.config.cwd,
+                )
                 if not success:
                     raise WorkflowError(f"{context} failed after retries")
             finally:
@@ -216,9 +221,14 @@ class PhaseProcessor:
             )
             return True
         result = await self._hook_runner.run_command(
-            HookConfig(cmd=transition.cmd, stdin=transition.stdin),
+            HookConfig(
+                cmd=transition.cmd,
+                stdin=transition.stdin,
+                cwd=transition.cwd,
+            ),
             extra_env,
             context,
+            cwd=self.config.cwd,
             execution_context=self._hook_execution_context(
                 entity,
                 transition,
@@ -284,6 +294,7 @@ class PhaseProcessor:
             target.hook,
             extra_env,
             context,
+            cwd=self.config.cwd,
             capture_selector_output=True,
             execution_context=self._hook_execution_context(
                 entity,
