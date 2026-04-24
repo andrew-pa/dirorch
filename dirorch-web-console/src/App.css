@@ -953,6 +953,74 @@
       var(--shadow-strong);
     animation: panel-enter 260ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
   }
+
+  .entity-dialog--panel .dialog-header {
+    padding: 1.6rem 1.8rem 1rem;
+  }
+
+  .entity-dialog--panel .dialog-title {
+    font-size: clamp(1.65rem, 2.2vw, 2.15rem);
+  }
+
+  .entity-dialog--panel .dialog-tabs {
+    padding: 0 1.8rem 1rem;
+  }
+
+  .entity-dialog--panel .dialog-body {
+    gap: 1.25rem;
+    padding: 0 1.8rem 1.4rem;
+    overflow: auto;
+  }
+
+  .entity-dialog--panel .entity-dialog__layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    flex: 0 0 auto;
+  }
+
+  .entity-dialog--panel .entity-form {
+    gap: 1.2rem;
+  }
+
+  .entity-dialog--panel .entity-form__grid {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(9rem, 0.5fr));
+    align-items: end;
+    gap: 0.9rem;
+    padding: 0.9rem;
+    border: 1px solid rgba(69, 232, 255, 0.12);
+    border-radius: 0.12rem;
+    background: rgba(6, 12, 19, 0.42);
+  }
+
+  .entity-dialog--panel .field__input {
+    min-height: 3rem;
+  }
+
+  .entity-dialog--panel .document-editor {
+    gap: 0.95rem;
+  }
+
+  .entity-dialog--panel .document-editor__toolbar {
+    padding: 0.5rem;
+    border: 1px solid rgba(69, 232, 255, 0.12);
+    border-radius: 0.12rem;
+    background: rgba(6, 12, 19, 0.42);
+  }
+
+  .entity-dialog--panel .editor-surface {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+      0 14px 36px rgba(0, 0, 0, 0.28);
+  }
+
+  .entity-dialog--panel .entity-dialog__side {
+    min-height: 18rem;
+  }
+
+  .entity-dialog--panel .dialog-footer {
+    padding: 1rem 1.8rem 1.25rem;
+  }
 }
 
 @media (max-width: 1200px) {

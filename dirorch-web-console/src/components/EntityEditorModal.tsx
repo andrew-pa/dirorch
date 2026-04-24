@@ -580,6 +580,9 @@ export function EntityEditorModal({
 
                       <DocumentContentEditor
                         format={draft.format}
+                        height={
+                          presentation === 'panel' ? 'clamp(24rem, 48vh, 40rem)' : undefined
+                        }
                         editorMode={draft.editorMode}
                         readOnly={readOnly}
                         rawContent={draft.rawContent}
@@ -639,15 +642,17 @@ export function EntityEditorModal({
                       ) : null}
                     </section>
 
-                    <section className="entity-dialog__side">
-                      {selectedFilePath ? (
-                        <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
-                      ) : (
-                        <EmptyState className="panel-placeholder" icon={<Plus size={16} />}>
-                          No linked file selected
-                        </EmptyState>
-                      )}
-                    </section>
+                    {selectedFilePath || presentation !== 'panel' ? (
+                      <section className="entity-dialog__side">
+                        {selectedFilePath ? (
+                          <LinkedFileEditor path={selectedFilePath} readOnly={readOnly} />
+                        ) : (
+                          <EmptyState className="panel-placeholder" icon={<Plus size={16} />}>
+                            No linked file selected
+                          </EmptyState>
+                        )}
+                      </section>
+                    ) : null}
                   </div>
                 )}
 
