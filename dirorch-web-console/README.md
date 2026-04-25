@@ -6,7 +6,7 @@ Run the console with:
 npm run dev
 ```
 
-The console connects directly to the backend URL shown in the UI. The value is stored in `sessionStorage`, so each browser tab can point at a different Dirorch backend. The default is `http://127.0.0.1:8000`; set `VITE_DIRORCH_API_BASE` to change the build-time default.
+The console connects directly to the backend URL shown in the UI. The value is stored in `sessionStorage`, so each browser tab can point at a different Dirorch backend. The default is `http://<current browser hostname>:8000`; set `VITE_DIRORCH_API_BASE` to change the build-time default.
 
 The Vite dev server does not proxy API routes. Start Dirorch with `--web`, and configure additional CORS origins with `DIRORCH_WEB_CORS_ORIGINS` if the console is hosted from a non-loopback, non-same-host origin.
 

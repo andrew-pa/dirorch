@@ -143,7 +143,7 @@ Or with an explicit bind address:
 dirorch ./workflow.yaml --root ./work --web --web-log --web-host 0.0.0.0 --web-port 9000
 ```
 
-The web console connects directly to the API URL configured in the UI. The browser setting is stored per tab, defaults to `http://127.0.0.1:8000`, and can be overridden at build time with `VITE_DIRORCH_API_BASE`.
+The web console connects directly to the API URL configured in the UI. The browser setting is stored per tab, defaults to `http://<current browser hostname>:8000`, and can be overridden at build time with `VITE_DIRORCH_API_BASE`.
 
 The API sends CORS headers for loopback origins and same-host origins by default. To allow additional browser origins, set a comma-separated `DIRORCH_WEB_CORS_ORIGINS` value before starting Dirorch:
 

@@ -1,8 +1,9 @@
-const FALLBACK_BACKEND_ENDPOINT = 'http://127.0.0.1:8000'
+const FALLBACK_BACKEND_HOST = '127.0.0.1'
+const DEFAULT_BACKEND_PORT = '8000'
 const STORAGE_KEY = 'dirorch.backendEndpoint'
 
 const DEFAULT_BACKEND_ENDPOINT = normalizeBackendEndpoint(
-  import.meta.env.VITE_DIRORCH_API_BASE || FALLBACK_BACKEND_ENDPOINT,
+  import.meta.env.VITE_DIRORCH_API_BASE || browserBackendEndpoint(),
 )
 
 let backendEndpoint = readBackendEndpoint()
@@ -80,4 +81,12 @@ function readBackendEndpoint() {
     window.sessionStorage.removeItem(STORAGE_KEY)
     return DEFAULT_BACKEND_ENDPOINT
   }
+}
+
+function browserBackendEndpoint() {
+  if (typeof window === 'undefined' || !window.location.hostname) {
+    return `http://${FALLBACK_BACKEND_HOST}:${DEFAULT_BACKEND_PORT}`
+  }
+
+  return `http://${window.location.hostname}:${DEFAULT_BACKEND_PORT}`
 }
