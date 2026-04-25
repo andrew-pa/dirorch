@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, LoaderCircle, Settings } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
@@ -18,8 +18,8 @@ import {
   setBackendEndpoint,
 } from './api/backendEndpoint'
 import type { EntitySummary } from './api/types'
-import { BackendEndpointControl } from './components/BackendEndpointControl'
 import { EntityEditorModal } from './components/EntityEditorModal'
+import { SettingsModal } from './components/SettingsModal'
 import { WorkflowOverview } from './components/WorkflowOverview'
 import { EmptyState } from './components/ui/EmptyState'
 import './App.css'
@@ -40,6 +40,7 @@ export default function App() {
   const queryClient = useQueryClient()
   const defaultBackendEndpoint = getDefaultBackendEndpoint()
   const [backendEndpoint, setBackendEndpointState] = useState(getBackendEndpoint)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [modalState, setModalState] = useState<ModalState>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [usePanelEditor, setUsePanelEditor] = useState(() =>
@@ -109,6 +110,7 @@ export default function App() {
     setBackendEndpointState(normalizedEndpoint)
     setModalState(null)
     setMoveError(null)
+    setSettingsOpen(false)
     queryClient.clear()
   }
 
@@ -117,6 +119,7 @@ export default function App() {
     setBackendEndpointState(normalizedEndpoint)
     setModalState(null)
     setMoveError(null)
+    setSettingsOpen(false)
     queryClient.clear()
   }
 
@@ -163,24 +166,29 @@ export default function App() {
   const loading =
     !workflowQuery.data || !statusQuery.data || !entitiesQuery.data || workflowQuery.isLoading
   const error = workflowQuery.error ?? statusQuery.error ?? entitiesQuery.error
-  const backendEndpointControl = (
-    <BackendEndpointControl
-      defaultEndpoint={defaultBackendEndpoint}
-      endpoint={backendEndpoint}
-      key={backendEndpoint}
-      onChange={handleBackendEndpointChange}
-      onReset={handleBackendEndpointReset}
+  const settingsModal = (
+    <SettingsModal
+      backendEndpoint={backendEndpoint}
+      defaultBackendEndpoint={defaultBackendEndpoint}
+      onBackendEndpointChange={handleBackendEndpointChange}
+      onBackendEndpointReset={handleBackendEndpointReset}
+      onOpenChange={setSettingsOpen}
+      open={settingsOpen}
     />
   )
 
   if (loading) {
     return (
       <>
-        {backendEndpointControl}
+        {settingsModal}
         <main className="app-state">
           <EmptyState icon={<LoaderCircle className="spin" size={18} />}>
             Loading workflow console
           </EmptyState>
+          <button className="button button--ghost" type="button" onClick={() => setSettingsOpen(true)}>
+            <Settings size={16} />
+            Settings
+          </button>
         </main>
       </>
     )
@@ -189,12 +197,18 @@ export default function App() {
   if (error) {
     return (
       <>
-        {backendEndpointControl}
+        {settingsModal}
         <main className="app-state app-state--error">
           <EmptyState icon={<AlertTriangle size={18} />}>{formatError(error)}</EmptyState>
-          <button className="button button--ghost" type="button" onClick={() => void handleRefresh()}>
-            Retry
-          </button>
+          <div className="app-state__actions">
+            <button className="button button--ghost" type="button" onClick={() => void handleRefresh()}>
+              Retry
+            </button>
+            <button className="button button--ghost" type="button" onClick={() => setSettingsOpen(true)}>
+              <Settings size={16} />
+              Settings
+            </button>
+          </div>
         </main>
       </>
     )
@@ -202,7 +216,7 @@ export default function App() {
 
   return (
     <>
-      {backendEndpointControl}
+      {settingsModal}
 
       {moveError ? (
         <main className="app-notice">
@@ -225,6 +239,7 @@ export default function App() {
             movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
             onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
             onMoveEntity={(entity, phase, state) => void handleMoveEntity(entity, phase, state)}
+            onOpenSettings={() => setSettingsOpen(true)}
             onPauseWorkflow={() => void handlePauseWorkflow()}
             onRefresh={() => void handleRefresh()}
             onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}

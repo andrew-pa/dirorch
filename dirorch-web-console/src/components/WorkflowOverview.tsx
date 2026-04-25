@@ -15,6 +15,7 @@ import {
   Play,
   RefreshCw,
   Route,
+  Settings,
   Waypoints,
 } from 'lucide-react'
 
@@ -49,6 +50,7 @@ interface WorkflowOverviewProps {
   onPauseWorkflow: () => void
   onRefresh: () => void
   onSelectEntity: (entity: EntitySummary) => void
+  onOpenSettings: () => void
   status: WorkflowStatusPayload
   workflow: WorkflowDefinition
 }
@@ -63,6 +65,7 @@ export function WorkflowOverview({
   onPauseWorkflow,
   onRefresh,
   onSelectEntity,
+  onOpenSettings,
   status,
   workflow,
 }: WorkflowOverviewProps) {
@@ -108,6 +111,10 @@ export function WorkflowOverview({
               <button className="button button--ghost" type="button" onClick={onRefresh}>
                 <RefreshCw className={isRefreshing ? 'spin' : undefined} size={16} />
                 Refresh
+              </button>
+              <button className="button button--ghost" type="button" onClick={onOpenSettings}>
+                <Settings size={16} />
+                Settings
               </button>
             </>
           }

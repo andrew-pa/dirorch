@@ -20,16 +20,32 @@
   margin-bottom: 0.75rem;
 }
 
+.settings-dialog {
+  inset: 50% auto auto 50%;
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  transform: translate(-50%, -50%);
+  animation: settings-modal-enter 180ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
+}
+
+.settings-dialog__header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.settings-dialog__body {
+  padding-bottom: 1.25rem;
+}
+
 .backend-endpoint {
-  width: min(1680px, calc(100vw - 1.25rem));
-  margin: 0.85rem auto 0;
-  padding: 0.5rem;
+  width: 100%;
+  padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 0.1rem;
   background:
     linear-gradient(90deg, rgba(18, 28, 39, 0.94), rgba(8, 14, 22, 0.94)),
     var(--surface);
-  box-shadow: var(--shadow);
 }
 
 .backend-endpoint__form {
@@ -1036,7 +1052,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
-  min-height: calc(100vh - 5rem);
+  min-height: 100vh;
   font-size: 1rem;
 }
 
@@ -1054,6 +1070,13 @@
 
 .app-state--error {
   flex-direction: column;
+}
+
+.app-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
 .spin {
@@ -1086,6 +1109,17 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes settings-modal-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 0.65rem)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
   }
 }
 
@@ -1227,11 +1261,6 @@
   .console-shell {
     width: min(100vw - 1rem, 1600px);
     padding-top: 0.5rem;
-  }
-
-  .backend-endpoint {
-    width: min(100vw - 1rem, 1600px);
-    margin-top: 0.5rem;
   }
 
   .backend-endpoint__form {
