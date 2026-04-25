@@ -235,6 +235,24 @@ class EntityAdminService:
         )
         return self.get_entity(entity_id)
 
+    async def pause_all(self) -> dict[str, Any]:
+        entities = self._entities.list_all_entities()
+        entity_ids = {entity.name for entity in entities}
+        async with self._coordinator.mutate():
+            for entity_id in entity_ids:
+                self._pauses.set_paused(entity_id, True)
+        await self._command_registry.terminate_for_entities(entity_ids)
+        await asyncio.gather(
+            *(
+                self._emit_entity_event(entity_id, "entity.paused")
+                for entity_id in entity_ids
+            )
+        )
+        return {
+            "paused_entities": len(entity_ids),
+            "entities": self.list_entities(),
+        }
+
     async def delete_entity(self, entity_id: str) -> None:
         entity = self._require_unique_entity(entity_id)
         if self._tracker.is_processing(entity_id):

@@ -7,6 +7,7 @@ import {
   getEntities,
   getWorkflow,
   getWorkflowStatus,
+  pauseWorkflow,
   queryKeys,
   updateEntity,
 } from './api/dirorch'
@@ -84,6 +85,16 @@ export default function App() {
     },
   })
 
+  const pauseWorkflowMutation = useMutation({
+    mutationFn: pauseWorkflow,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus }),
+      ])
+    },
+  })
+
   async function handleRefresh() {
     await Promise.all([
       workflowQuery.refetch(),
@@ -101,6 +112,24 @@ export default function App() {
 
     try {
       await moveEntityMutation.mutateAsync({ entity, phase, state })
+    } catch (error) {
+      setMoveError(formatError(error))
+    }
+  }
+
+  async function handlePauseWorkflow() {
+    if (
+      !window.confirm(
+        'Emergency stop will pause every entity and terminate any running entity hook commands. Continue?',
+      )
+    ) {
+      return
+    }
+
+    setMoveError(null)
+
+    try {
+      await pauseWorkflowMutation.mutateAsync()
     } catch (error) {
       setMoveError(formatError(error))
     }
@@ -149,10 +178,12 @@ export default function App() {
         <div className="app-workspace__workflow">
           <WorkflowOverview
             entities={entitiesQuery.data.entities}
+            isPausingWorkflow={pauseWorkflowMutation.isPending}
             isRefreshing={statusQuery.isRefetching || entitiesQuery.isRefetching}
             movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
             onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
             onMoveEntity={(entity, phase, state) => void handleMoveEntity(entity, phase, state)}
+            onPauseWorkflow={() => void handlePauseWorkflow()}
             onRefresh={() => void handleRefresh()}
             onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}
             status={statusQuery.data}

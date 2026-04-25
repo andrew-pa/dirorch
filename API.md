@@ -363,6 +363,47 @@ Errors:
 
 - `500` if internal workflow state cannot be read
 
+### POST `/workflow/pause`
+
+Emergency stop workflow processing by pausing every known entity.
+
+Request body: none.
+
+Operational semantics:
+
+- All known entities are marked paused in `${root}/.dirorch_paused.json`.
+- Running entity hook commands receive `SIGTERM` through the same pause path as `PUT /entity/{id}/pause`.
+- Paused entities remain in place and are skipped by future workflow transition selection until individually resumed.
+- The operation is idempotent.
+
+Response `200`:
+
+```json
+{
+  "paused_entities": 2,
+  "entities": [
+    {
+      "id": "task.txt",
+      "phase": "tasks",
+      "state": "new",
+      "locked": false,
+      "paused": true,
+      "processing": false,
+      "format": "text"
+    }
+  ]
+}
+```
+
+Fields:
+
+- `paused_entities: integer`
+- `entities: array<EntitySummary>`
+
+Errors:
+
+- `500` if pause state cannot be written
+
 ### GET `/status/workflow`
 
 Return workflow runtime state, counts, locks, and current execution activity.

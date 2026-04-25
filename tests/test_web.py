@@ -735,6 +735,87 @@ phases:
     asyncio.run(scenario())
 
 
+def test_web_api_global_pause_pauses_entities_and_sigterms_hooks(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: >
+          python -c "import pathlib, signal, sys, time;
+          marker = pathlib.Path('global-pause-term.txt');
+          signal.signal(signal.SIGTERM, lambda *_args: (marker.write_text('terminated', encoding='utf-8'), sys.exit(0)));
+          time.sleep(30)"
+""",
+    )
+    _write(tmp_path / "tasks" / "new" / "running.txt", "payload")
+    _write(tmp_path / "tasks" / "new" / "waiting.txt", "payload")
+    port = _free_port()
+
+    async def scenario() -> None:
+        options = CliOptions(
+            workflow=workflow,
+            root=tmp_path,
+            retries_override=None,
+            state_file=".dirorch_runtime.json",
+            log_level="ERROR",
+            web=True,
+            web_host="127.0.0.1",
+            web_port=port,
+            watch=True,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        server_task = asyncio.create_task(run(options))
+        try:
+            await _wait_for_server(base_url)
+            async with aiohttp.ClientSession() as session:
+                await _wait_for_processing(session, base_url, "running.txt")
+
+                async with session.post(f"{base_url}/workflow/pause") as response:
+                    paused = await response.json()
+                assert response.status == 200
+                assert paused["paused_entities"] == 2
+                assert {entity["id"] for entity in paused["entities"]} == {
+                    "running.txt",
+                    "waiting.txt",
+                }
+                assert all(entity["paused"] for entity in paused["entities"])
+
+                await _wait_for_path(tmp_path / "global-pause-term.txt")
+
+                deadline = asyncio.get_running_loop().time() + 5.0
+                while True:
+                    running = await _wait_for_entity(session, base_url, "running.txt")
+                    if not running["processing"]:
+                        break
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise AssertionError("Timed out waiting for running.txt to stop")
+                    await asyncio.sleep(0.05)
+
+                waiting = await _wait_for_entity(session, base_url, "waiting.txt")
+                assert running["paused"] is True
+                assert waiting["paused"] is True
+                assert running["state"] == "new"
+                assert waiting["state"] == "new"
+                assert not (tmp_path / "tasks" / "done" / "running.txt").exists()
+                assert not (tmp_path / "tasks" / "done" / "waiting.txt").exists()
+
+                async with session.get(f"{base_url}/status/workflow") as response:
+                    workflow_status = await response.json()
+                assert workflow_status["paused_entities"] == 2
+        finally:
+            server_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await server_task
+
+    asyncio.run(scenario())
+
+
 def test_web_log_endpoints_stream_live_entity_output(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(

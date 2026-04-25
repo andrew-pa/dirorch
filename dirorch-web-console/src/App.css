@@ -530,6 +530,15 @@
   box-shadow: 0 0 18px rgba(255, 209, 102, 0.12);
 }
 
+.button--danger {
+  border-color: rgba(255, 107, 156, 0.5);
+  background:
+    linear-gradient(180deg, rgba(255, 107, 156, 0.2), rgba(35, 8, 19, 0.98)),
+    rgba(45, 10, 23, 0.96);
+  color: #ffd2df;
+  box-shadow: 0 0 18px rgba(255, 107, 156, 0.14);
+}
+
 .button:disabled,
 .icon-button:disabled,
 .segmented-control__button:disabled {

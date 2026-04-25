@@ -44,6 +44,7 @@ def build_web_app(services: WebServices) -> web.Application:
     app.add_routes(
         [
             web.get("/workflow", _get_workflow),
+            web.post("/workflow/pause", _post_workflow_pause),
             web.get("/status/workflow", _get_workflow_status),
             web.get("/status/entities", _get_entity_status),
             web.get("/entity/{id}", _get_entity),
@@ -130,6 +131,11 @@ async def _error_middleware(
 async def _get_workflow(request: web.Request) -> web.Response:
     services = _services(request)
     return web.json_response(services.definition.describe())
+
+
+async def _post_workflow_pause(request: web.Request) -> web.Response:
+    services = _services(request)
+    return web.json_response(await services.entities.pause_all())
 
 
 async def _get_workflow_status(request: web.Request) -> web.Response:

@@ -135,6 +135,11 @@ export interface EntityStatusPayload {
   entities: EntitySummary[]
 }
 
+export interface WorkflowPausePayload {
+  paused_entities: number
+  entities: EntitySummary[]
+}
+
 export interface CreateEntityPayload {
   id: string
   phase: string

@@ -125,6 +125,16 @@ class ActiveShellCommandRegistry:
         for handle in handles:
             handle.request_pause()
 
+    async def terminate_for_entities(self, entity_ids: set[str]) -> None:
+        async with self._lock:
+            handles = [
+                handle
+                for entity_id in entity_ids
+                for handle in self._processes.get(entity_id, {}).values()
+            ]
+        for handle in handles:
+            handle.request_pause()
+
 
 def terminate_process_group(pid: int | None) -> None:
     if pid is None:

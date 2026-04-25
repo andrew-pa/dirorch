@@ -6,6 +6,7 @@ import type {
   FileDetail,
   UpdateEntityPayload,
   WorkflowDefinition,
+  WorkflowPausePayload,
   WorkflowStatusPayload,
   WriteFilePayload,
 } from './types'
@@ -48,6 +49,12 @@ export async function getWorkflowStatus() {
 
 export async function getEntities() {
   return requestJson<EntityStatusPayload>('/status/entities')
+}
+
+export async function pauseWorkflow() {
+  return requestJson<WorkflowPausePayload>('/workflow/pause', {
+    method: 'POST',
+  })
 }
 
 export async function getEntity(entityId: string) {

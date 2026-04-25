@@ -9,6 +9,7 @@ import {
   CircleAlert,
   CircleDot,
   FilePlus2,
+  LoaderCircle,
   Lock,
   Pause,
   Play,
@@ -41,9 +42,11 @@ import { Surface } from './ui/Surface'
 interface WorkflowOverviewProps {
   entities: EntitySummary[]
   isRefreshing: boolean
+  isPausingWorkflow: boolean
   movingEntityId: string | null
   onCreateEntity: (phase: string, state: string) => void
   onMoveEntity: (entity: EntitySummary, phase: string, state: string) => void
+  onPauseWorkflow: () => void
   onRefresh: () => void
   onSelectEntity: (entity: EntitySummary) => void
   status: WorkflowStatusPayload
@@ -53,9 +56,11 @@ interface WorkflowOverviewProps {
 export function WorkflowOverview({
   entities,
   isRefreshing,
+  isPausingWorkflow,
   movingEntityId,
   onCreateEntity,
   onMoveEntity,
+  onPauseWorkflow,
   onRefresh,
   onSelectEntity,
   status,
@@ -86,10 +91,25 @@ export function WorkflowOverview({
           eyebrow="Dirorch Console"
           title={<h1 className="console-header__title">Workflow</h1>}
           actions={
-            <button className="button button--ghost" type="button" onClick={onRefresh}>
-              <RefreshCw className={isRefreshing ? 'spin' : undefined} size={16} />
-              Refresh
-            </button>
+            <>
+              <button
+                className="button button--danger"
+                type="button"
+                disabled={isPausingWorkflow || entities.length === 0}
+                onClick={onPauseWorkflow}
+              >
+                {isPausingWorkflow ? (
+                  <LoaderCircle className="spin" size={16} />
+                ) : (
+                  <Pause size={16} />
+                )}
+                Emergency stop
+              </button>
+              <button className="button button--ghost" type="button" onClick={onRefresh}>
+                <RefreshCw className={isRefreshing ? 'spin' : undefined} size={16} />
+                Refresh
+              </button>
+            </>
           }
         />
       </header>
