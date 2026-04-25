@@ -289,6 +289,7 @@ Response `200`:
 
 ```json
 {
+  "workflow_file": "work/workflow.yaml",
   "phase_order": ["tasks"],
   "environment": {},
   "retries": 3,
@@ -318,6 +319,8 @@ Response `200`:
 
 Fields:
 
+- `workflow_file: string`
+  Compact workflow path label containing the immediate parent directory and file name.
 - `phase_order: array<string>`
 - `environment: object`
 - `retries: integer`

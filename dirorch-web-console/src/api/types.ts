@@ -35,6 +35,7 @@ export interface PhaseDefinition {
 }
 
 export interface WorkflowDefinition {
+  workflow_file: string
   phase_order: string[]
   environment: Record<string, string>
   retries: number

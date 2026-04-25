@@ -146,7 +146,8 @@ class WorkflowRunner:
 
 
 def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContext:
-    config = load_workflow(resolve_workflow_path(options.workflow))
+    workflow_path = resolve_workflow_path(options.workflow)
+    config = load_workflow(workflow_path)
     retries = (
         options.retries_override
         if options.retries_override is not None
@@ -232,7 +233,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             broadcaster=broadcaster,
         )
         services = WebServices(
-            definition=WorkflowDefinitionService(config),
+            definition=WorkflowDefinitionService(config, workflow_path),
             status=WorkflowStatusService(
                 state=state,
                 tracker=tracker,

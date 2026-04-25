@@ -38,8 +38,9 @@ class MutationCoordinator:
 
 
 class WorkflowDefinitionService:
-    def __init__(self, config: WorkflowConfig) -> None:
+    def __init__(self, config: WorkflowConfig, workflow_path: Path) -> None:
         self._config = config
+        self._workflow_path = workflow_path
 
     def describe(self) -> dict[str, Any]:
         phases: list[dict[str, Any]] = []
@@ -70,6 +71,7 @@ class WorkflowDefinitionService:
                 }
             )
         return {
+            "workflow_file": self._workflow_file_label(),
             "phase_order": list(self._config.phase_order),
             "environment": self._config.environment,
             "retries": self._config.retries,
@@ -83,6 +85,12 @@ class WorkflowDefinitionService:
             },
             "phases": phases,
         }
+
+    def _workflow_file_label(self) -> str:
+        parent_name = self._workflow_path.parent.name
+        if not parent_name:
+            return self._workflow_path.name
+        return f"{parent_name}/{self._workflow_path.name}"
 
     def _serialize_named_target(
         self,

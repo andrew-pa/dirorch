@@ -89,7 +89,7 @@ export function WorkflowOverview({
         <SectionHeader
           contentClassName="console-header__brand"
           eyebrow="Dirorch Console"
-          title={<h1 className="console-header__title">Workflow</h1>}
+          title={<h1 className="console-header__title">{workflow.workflow_file}</h1>}
           actions={
             <>
               <button

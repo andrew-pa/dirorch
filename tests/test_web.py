@@ -221,6 +221,7 @@ phases:
                 async with session.get(f"{base_url}/workflow") as response:
                     workflow_payload = await response.json()
                 assert workflow_payload["phase_order"] == ["tasks"]
+                assert workflow_payload["workflow_file"] == f"{tmp_path.name}/workflow.yaml"
 
                 async with session.post(
                     f"{base_url}/entity",
