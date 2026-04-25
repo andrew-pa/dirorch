@@ -20,6 +20,76 @@
   margin-bottom: 0.75rem;
 }
 
+.backend-endpoint {
+  width: min(1680px, calc(100vw - 1.25rem));
+  margin: 0.85rem auto 0;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.1rem;
+  background:
+    linear-gradient(90deg, rgba(18, 28, 39, 0.94), rgba(8, 14, 22, 0.94)),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.backend-endpoint__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.55rem;
+}
+
+.backend-endpoint__field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.backend-endpoint__label,
+.backend-endpoint__actions,
+.backend-endpoint__error {
+  display: flex;
+  align-items: center;
+}
+
+.backend-endpoint__label {
+  gap: 0.35rem;
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.backend-endpoint__input {
+  width: 100%;
+  min-height: 2.1rem;
+  padding: 0 0.7rem;
+  border: 1px solid rgba(69, 232, 255, 0.22);
+  border-radius: 0.08rem;
+  background: rgba(5, 10, 17, 0.84);
+  color: var(--text);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.backend-endpoint__input:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px rgba(69, 232, 255, 0.12);
+}
+
+.backend-endpoint__actions {
+  gap: 0.45rem;
+}
+
+.backend-endpoint__error {
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  color: #ffc1d1;
+  font-size: 0.78rem;
+}
+
 .app-notice {
   width: min(1680px, calc(100vw - 1.25rem));
   margin: 0.85rem auto 0;
@@ -966,7 +1036,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
-  min-height: 100vh;
+  min-height: calc(100vh - 5rem);
   font-size: 1rem;
 }
 
@@ -1157,6 +1227,19 @@
   .console-shell {
     width: min(100vw - 1rem, 1600px);
     padding-top: 0.5rem;
+  }
+
+  .backend-endpoint {
+    width: min(100vw - 1rem, 1600px);
+    margin-top: 0.5rem;
+  }
+
+  .backend-endpoint__form {
+    grid-template-columns: 1fr;
+  }
+
+  .backend-endpoint__actions {
+    flex-wrap: wrap;
   }
 
   .phase-row,

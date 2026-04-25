@@ -10,8 +10,7 @@ import type {
   WorkflowStatusPayload,
   WriteFilePayload,
 } from './types'
-
-const API_BASE = (import.meta.env.VITE_DIRORCH_API_BASE ?? '').replace(/\/$/, '')
+import { getBackendEndpoint } from './backendEndpoint'
 
 interface ErrorEnvelope {
   error?: string
@@ -31,12 +30,12 @@ export class ApiError extends Error {
 }
 
 export const queryKeys = {
-  workflow: ['workflow'] as const,
-  workflowStatus: ['workflow-status'] as const,
-  entities: ['entities'] as const,
-  entity: (entityId: string) => ['entity', entityId] as const,
-  entityLog: (entityId: string) => ['entity-log', entityId] as const,
-  file: (path: string) => ['file', path] as const,
+  workflow: () => [getBackendEndpoint(), 'workflow'] as const,
+  workflowStatus: () => [getBackendEndpoint(), 'workflow-status'] as const,
+  entities: () => [getBackendEndpoint(), 'entities'] as const,
+  entity: (entityId: string) => [getBackendEndpoint(), 'entity', entityId] as const,
+  entityLog: (entityId: string) => [getBackendEndpoint(), 'entity-log', entityId] as const,
+  file: (path: string) => [getBackendEndpoint(), 'file', path] as const,
 }
 
 export async function getWorkflow() {
@@ -106,7 +105,7 @@ export async function getEntityLog(
 export function openEntityLogEvents(entityId: string, fromOffset: number) {
   const params = new URLSearchParams({ from_offset: String(fromOffset) })
   return new EventSource(
-    `${API_BASE}/entity/${encodeURIComponent(entityId)}/log/events?${params.toString()}`,
+    `${getBackendEndpoint()}/entity/${encodeURIComponent(entityId)}/log/events?${params.toString()}`,
   )
 }
 
@@ -129,7 +128,7 @@ export async function updateFile(path: string, payload: WriteFilePayload) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit) {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${getBackendEndpoint()}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',

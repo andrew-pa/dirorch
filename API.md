@@ -25,7 +25,16 @@ Base URL example:
 http://127.0.0.1:8000
 ```
 
+The browser console connects directly to the configured API URL. The UI stores that URL in `sessionStorage`, so each tab can target a different backend.
+
 ## General Conventions
+
+### CORS
+
+- Loopback browser origins and same-host browser origins are allowed by default.
+- JSON preflight requests and SSE log streams receive CORS headers when the origin is allowed.
+- Set `DIRORCH_WEB_CORS_ORIGINS` to a comma-separated list of additional allowed origins when hosting the console from another origin.
+- Use `DIRORCH_WEB_CORS_ORIGINS=*` only for isolated development environments.
 
 ### Content Type
 

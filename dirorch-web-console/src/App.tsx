@@ -11,7 +11,14 @@ import {
   queryKeys,
   updateEntity,
 } from './api/dirorch'
+import {
+  getBackendEndpoint,
+  getDefaultBackendEndpoint,
+  resetBackendEndpoint,
+  setBackendEndpoint,
+} from './api/backendEndpoint'
 import type { EntitySummary } from './api/types'
+import { BackendEndpointControl } from './components/BackendEndpointControl'
 import { EntityEditorModal } from './components/EntityEditorModal'
 import { WorkflowOverview } from './components/WorkflowOverview'
 import { EmptyState } from './components/ui/EmptyState'
@@ -31,6 +38,8 @@ type ModalState =
 
 export default function App() {
   const queryClient = useQueryClient()
+  const defaultBackendEndpoint = getDefaultBackendEndpoint()
+  const [backendEndpoint, setBackendEndpointState] = useState(getBackendEndpoint)
   const [modalState, setModalState] = useState<ModalState>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [usePanelEditor, setUsePanelEditor] = useState(() =>
@@ -47,19 +56,19 @@ export default function App() {
   }, [])
 
   const workflowQuery = useQuery({
-    queryKey: queryKeys.workflow,
+    queryKey: queryKeys.workflow(),
     queryFn: getWorkflow,
     staleTime: 60_000,
   })
 
   const statusQuery = useQuery({
-    queryKey: queryKeys.workflowStatus,
+    queryKey: queryKeys.workflowStatus(),
     queryFn: getWorkflowStatus,
     refetchInterval: 2_000,
   })
 
   const entitiesQuery = useQuery({
-    queryKey: queryKeys.entities,
+    queryKey: queryKeys.entities(),
     queryFn: getEntities,
     refetchInterval: 2_000,
   })
@@ -78,8 +87,8 @@ export default function App() {
     },
     onSuccess: async (_, { entity }) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.entities }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.entity(entity.id) }),
       ])
     },
@@ -89,11 +98,27 @@ export default function App() {
     mutationFn: pauseWorkflow,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.entities }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus() }),
       ])
     },
   })
+
+  function handleBackendEndpointChange(nextEndpoint: string) {
+    const normalizedEndpoint = setBackendEndpoint(nextEndpoint)
+    setBackendEndpointState(normalizedEndpoint)
+    setModalState(null)
+    setMoveError(null)
+    queryClient.clear()
+  }
+
+  function handleBackendEndpointReset() {
+    const normalizedEndpoint = resetBackendEndpoint()
+    setBackendEndpointState(normalizedEndpoint)
+    setModalState(null)
+    setMoveError(null)
+    queryClient.clear()
+  }
 
   async function handleRefresh() {
     await Promise.all([
@@ -138,30 +163,47 @@ export default function App() {
   const loading =
     !workflowQuery.data || !statusQuery.data || !entitiesQuery.data || workflowQuery.isLoading
   const error = workflowQuery.error ?? statusQuery.error ?? entitiesQuery.error
+  const backendEndpointControl = (
+    <BackendEndpointControl
+      defaultEndpoint={defaultBackendEndpoint}
+      endpoint={backendEndpoint}
+      key={backendEndpoint}
+      onChange={handleBackendEndpointChange}
+      onReset={handleBackendEndpointReset}
+    />
+  )
 
   if (loading) {
     return (
-      <main className="app-state">
-        <EmptyState icon={<LoaderCircle className="spin" size={18} />}>
-          Loading workflow console
-        </EmptyState>
-      </main>
+      <>
+        {backendEndpointControl}
+        <main className="app-state">
+          <EmptyState icon={<LoaderCircle className="spin" size={18} />}>
+            Loading workflow console
+          </EmptyState>
+        </main>
+      </>
     )
   }
 
   if (error) {
     return (
-      <main className="app-state app-state--error">
-        <EmptyState icon={<AlertTriangle size={18} />}>{formatError(error)}</EmptyState>
-        <button className="button button--ghost" type="button" onClick={() => void handleRefresh()}>
-          Retry
-        </button>
-      </main>
+      <>
+        {backendEndpointControl}
+        <main className="app-state app-state--error">
+          <EmptyState icon={<AlertTriangle size={18} />}>{formatError(error)}</EmptyState>
+          <button className="button button--ghost" type="button" onClick={() => void handleRefresh()}>
+            Retry
+          </button>
+        </main>
+      </>
     )
   }
 
   return (
     <>
+      {backendEndpointControl}
+
       {moveError ? (
         <main className="app-notice">
           <div className="inline-error">{moveError}</div>

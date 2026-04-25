@@ -77,7 +77,7 @@ export function EntityEditorModal({
   const queryClient = useQueryClient()
   const entityId = summary?.id ?? null
   const detailQuery = useQuery({
-    queryKey: entityId ? queryKeys.entity(entityId) : ['entity', 'draft'],
+    queryKey: entityId ? queryKeys.entity(entityId) : [...queryKeys.entities(), 'draft'],
     queryFn: () => getEntity(entityId!),
     enabled: mode === 'edit' && Boolean(entityId),
     retry: false,
@@ -760,8 +760,8 @@ async function invalidateConsoleQueries(
   entityId: string,
 ) {
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: queryKeys.entities }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.entities() }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus() }),
     queryClient.invalidateQueries({ queryKey: queryKeys.entity(entityId) }),
   ])
 }

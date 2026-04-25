@@ -218,10 +218,30 @@ phases:
         try:
             await _wait_for_server(base_url)
             async with aiohttp.ClientSession() as session:
+                cors_origin = "http://localhost:5173"
+                async with session.options(
+                    f"{base_url}/entity",
+                    headers={
+                        "Origin": cors_origin,
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "content-type",
+                    },
+                ) as response:
+                    assert response.status == 204
+                    assert response.headers["Access-Control-Allow-Origin"] == cors_origin
+                    assert "POST" in response.headers["Access-Control-Allow-Methods"]
+                    assert response.headers["Access-Control-Allow-Headers"] == "content-type"
+
                 async with session.get(f"{base_url}/workflow") as response:
                     workflow_payload = await response.json()
                 assert workflow_payload["phase_order"] == ["tasks"]
                 assert workflow_payload["workflow_file"] == f"{tmp_path.name}/workflow.yaml"
+
+                async with session.get(
+                    f"{base_url}/workflow",
+                    headers={"Origin": cors_origin},
+                ) as response:
+                    assert response.headers["Access-Control-Allow-Origin"] == cors_origin
 
                 async with session.post(
                     f"{base_url}/entity",
@@ -860,8 +880,13 @@ phases:
                 assert "transition started tasks:new -> done" in initial_log["text"]
 
                 async with session.get(
-                    f"{base_url}/entity/stream.txt/log/events?from_offset={initial_log['next_offset']}"
+                    f"{base_url}/entity/stream.txt/log/events?from_offset={initial_log['next_offset']}",
+                    headers={"Origin": "http://localhost:5173"},
                 ) as response:
+                    assert (
+                        response.headers["Access-Control-Allow-Origin"]
+                        == "http://localhost:5173"
+                    )
                     snapshot_event, snapshot_payload = await _read_sse_event(response)
                     assert snapshot_event == "snapshot"
                     assert snapshot_payload is not None

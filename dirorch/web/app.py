@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, overload
+from urllib.parse import ParseResult, urlparse
 
 from aiohttp import web
 
@@ -24,6 +27,10 @@ from ..services import (
 )
 
 LOG_STREAM_HEARTBEAT_SECONDS = 15.0
+CORS_ALLOWED_METHODS = "GET,POST,PUT,DELETE,OPTIONS"
+CORS_ALLOWED_HEADERS = "Content-Type,Accept"
+CORS_MAX_AGE_SECONDS = "600"
+CORS_ORIGINS_ENV_VAR = "DIRORCH_WEB_CORS_ORIGINS"
 
 
 @dataclass(frozen=True)
@@ -38,9 +45,20 @@ class WebServices:
 SERVICES_KEY: web.AppKey[WebServices] = web.AppKey("services", WebServices)
 
 
+@dataclass(frozen=True)
+class CorsPolicy:
+    allowed_origins: frozenset[str]
+    allow_all: bool = False
+
+
+CORS_POLICY_KEY: web.AppKey[CorsPolicy] = web.AppKey("cors_policy", CorsPolicy)
+
+
 def build_web_app(services: WebServices) -> web.Application:
-    app = web.Application(middlewares=[_error_middleware])
+    app = web.Application(middlewares=[_cors_middleware, _error_middleware])
     app[SERVICES_KEY] = services
+    app[CORS_POLICY_KEY] = _cors_policy_from_env()
+    app.on_response_prepare.append(_prepare_cors_headers)
     app.add_routes(
         [
             web.get("/workflow", _get_workflow),
@@ -93,6 +111,26 @@ class WebServer:
             await self._runner.cleanup()
             self._runner = None
             self._site = None
+
+
+@web.middleware
+async def _cors_middleware(
+    request: web.Request,
+    handler,
+) -> web.StreamResponse:
+    if request.method == "OPTIONS":
+        response = web.Response(status=204)
+        _apply_cors_headers(request, response)
+        return response
+
+    try:
+        response = await handler(request)
+    except web.HTTPException as exc:
+        _apply_cors_headers(request, exc)
+        raise
+
+    _apply_cors_headers(request, response)
+    return response
 
 
 @web.middleware
@@ -400,3 +438,93 @@ def _error_payload(code: str, message: str) -> dict[str, Any]:
         "error": message,
         "code": code,
     }
+
+
+async def _prepare_cors_headers(
+    request: web.Request,
+    response: web.StreamResponse,
+) -> None:
+    _apply_cors_headers(request, response)
+
+
+def _apply_cors_headers(
+    request: web.Request,
+    response: web.StreamResponse,
+) -> None:
+    origin = request.headers.get("Origin")
+    if origin is None or not _cors_origin_allowed(request, origin):
+        return
+
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Methods"] = CORS_ALLOWED_METHODS
+    response.headers["Access-Control-Allow-Headers"] = request.headers.get(
+        "Access-Control-Request-Headers",
+        CORS_ALLOWED_HEADERS,
+    )
+    response.headers["Access-Control-Max-Age"] = CORS_MAX_AGE_SECONDS
+    _append_vary_header(response, "Origin")
+
+
+def _cors_origin_allowed(request: web.Request, origin: str) -> bool:
+    parsed_origin = urlparse(origin)
+    if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.hostname:
+        return False
+
+    policy = request.app[CORS_POLICY_KEY]
+    if policy.allow_all:
+        return True
+
+    if _normalized_origin(parsed_origin) in policy.allowed_origins:
+        return True
+
+    origin_host = parsed_origin.hostname.lower()
+    return _is_loopback_host(origin_host) or origin_host == _request_hostname(request)
+
+
+def _cors_policy_from_env() -> CorsPolicy:
+    raw_origins = os.environ.get(CORS_ORIGINS_ENV_VAR, "")
+    allowed_origins: set[str] = set()
+    allow_all = False
+    for raw_origin in raw_origins.split(","):
+        origin = raw_origin.strip()
+        if not origin:
+            continue
+        if origin == "*":
+            allow_all = True
+            continue
+        parsed_origin = urlparse(origin)
+        if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.hostname:
+            continue
+        allowed_origins.add(_normalized_origin(parsed_origin))
+    return CorsPolicy(allowed_origins=frozenset(allowed_origins), allow_all=allow_all)
+
+
+def _normalized_origin(parsed_origin: ParseResult) -> str:
+    return f"{parsed_origin.scheme}://{parsed_origin.netloc.lower()}"
+
+
+def _request_hostname(request: web.Request) -> str:
+    host = request.host.strip().lower()
+    if host.startswith("["):
+        return host.removeprefix("[").split("]", maxsplit=1)[0]
+    return host.rsplit(":", maxsplit=1)[0]
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _append_vary_header(response: web.StreamResponse, value: str) -> None:
+    current = response.headers.get("Vary")
+    if not current:
+        response.headers["Vary"] = value
+        return
+
+    existing_values = {item.strip().lower() for item in current.split(",")}
+    if value.lower() not in existing_values:
+        response.headers["Vary"] = f"{current}, {value}"
