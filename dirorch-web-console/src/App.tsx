@@ -9,6 +9,7 @@ import {
   getWorkflowStatus,
   pauseWorkflow,
   queryKeys,
+  resumeWorkflow,
   updateEntity,
 } from './api/dirorch'
 import {
@@ -105,6 +106,16 @@ export default function App() {
     },
   })
 
+  const resumeWorkflowMutation = useMutation({
+    mutationFn: resumeWorkflow,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflowStatus() }),
+      ])
+    },
+  })
+
   function handleBackendEndpointChange(nextEndpoint: string) {
     const normalizedEndpoint = setBackendEndpoint(nextEndpoint)
     setBackendEndpointState(normalizedEndpoint)
@@ -148,7 +159,7 @@ export default function App() {
   async function handlePauseWorkflow() {
     if (
       !window.confirm(
-        'Emergency stop will pause every entity and terminate any running entity hook commands. Continue?',
+        'Emergency stop will pause the workflow engine and terminate running entity hook commands. Continue?',
       )
     ) {
       return
@@ -158,6 +169,16 @@ export default function App() {
 
     try {
       await pauseWorkflowMutation.mutateAsync()
+    } catch (error) {
+      setMoveError(formatError(error))
+    }
+  }
+
+  async function handleResumeWorkflow() {
+    setMoveError(null)
+
+    try {
+      await resumeWorkflowMutation.mutateAsync()
     } catch (error) {
       setMoveError(formatError(error))
     }
@@ -235,6 +256,7 @@ export default function App() {
           <WorkflowOverview
             entities={entitiesQuery.data.entities}
             isPausingWorkflow={pauseWorkflowMutation.isPending}
+            isResumingWorkflow={resumeWorkflowMutation.isPending}
             isRefreshing={statusQuery.isRefetching || entitiesQuery.isRefetching}
             movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
             onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
@@ -242,6 +264,7 @@ export default function App() {
             onOpenSettings={() => setSettingsOpen(true)}
             onPauseWorkflow={() => void handlePauseWorkflow()}
             onRefresh={() => void handleRefresh()}
+            onResumeWorkflow={() => void handleResumeWorkflow()}
             onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}
             status={statusQuery.data}
             workflow={workflowQuery.data}

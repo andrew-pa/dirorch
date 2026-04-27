@@ -116,7 +116,7 @@ export interface ExecutionActivity {
 }
 
 export interface ExecutionStatus {
-  runner_state: 'idle' | 'running' | 'stopped' | 'failed'
+  runner_state: 'idle' | 'running' | 'paused' | 'stopped' | 'failed'
   current_phase: string | null
   current_phase_mode: string | null
   activity: ExecutionActivity
@@ -129,6 +129,7 @@ export interface WorkflowStatusPayload {
   counts: Record<string, Record<string, number>>
   locked_entities: number
   paused_entities: number
+  workflow_pause_state: 'running' | 'pausing' | 'paused'
   execution: ExecutionStatus
 }
 
@@ -137,6 +138,7 @@ export interface EntityStatusPayload {
 }
 
 export interface WorkflowPausePayload {
+  workflow_pause_state: 'running' | 'pausing' | 'paused'
   paused_entities: number
   entities: EntitySummary[]
 }

@@ -33,6 +33,7 @@ class HookRunnerConfig:
     cwd: str | None = None
     entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
     is_entity_paused: Callable[[str], bool] = lambda _entity_id: False
+    is_workflow_pause_requested: Callable[[], bool] = lambda: False
     command_registry: ActiveShellCommandRegistry | None = None
 
 
@@ -74,6 +75,7 @@ class HookRunner:
         self._cwd = config.cwd
         self._entity_log_emitter = config.entity_log_emitter
         self._is_entity_paused = config.is_entity_paused
+        self._is_workflow_pause_requested = config.is_workflow_pause_requested
         self._command_registry = config.command_registry
         self._template_renderer = TemplateRenderer(self._root)
 
@@ -565,6 +567,8 @@ class HookRunner:
         )
 
     def _should_pause(self, execution_context: HookExecutionContext | None) -> bool:
+        if self._is_workflow_pause_requested():
+            return True
         return (
             execution_context is not None
             and execution_context.entity_id is not None

@@ -22,6 +22,7 @@ from ..services import (
     EntityAdminService,
     EntityLogService,
     FileAdminService,
+    WorkflowControlService,
     WorkflowDefinitionService,
     WorkflowStatusService,
 )
@@ -36,6 +37,7 @@ CORS_ORIGINS_ENV_VAR = "DIRORCH_WEB_CORS_ORIGINS"
 @dataclass(frozen=True)
 class WebServices:
     definition: WorkflowDefinitionService
+    control: WorkflowControlService
     status: WorkflowStatusService
     entities: EntityAdminService
     logs: EntityLogService
@@ -63,6 +65,7 @@ def build_web_app(services: WebServices) -> web.Application:
         [
             web.get("/workflow", _get_workflow),
             web.post("/workflow/pause", _post_workflow_pause),
+            web.post("/workflow/resume", _post_workflow_resume),
             web.get("/status/workflow", _get_workflow_status),
             web.get("/status/entities", _get_entity_status),
             web.get("/entity/{id}", _get_entity),
@@ -173,7 +176,12 @@ async def _get_workflow(request: web.Request) -> web.Response:
 
 async def _post_workflow_pause(request: web.Request) -> web.Response:
     services = _services(request)
-    return web.json_response(await services.entities.pause_all())
+    return web.json_response(await services.control.pause())
+
+
+async def _post_workflow_resume(request: web.Request) -> web.Response:
+    services = _services(request)
+    return web.json_response(await services.control.resume())
 
 
 async def _get_workflow_status(request: web.Request) -> web.Response:

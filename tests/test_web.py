@@ -756,7 +756,7 @@ phases:
     asyncio.run(scenario())
 
 
-def test_web_api_global_pause_pauses_entities_and_sigterms_hooks(tmp_path: Path) -> None:
+def test_web_api_workflow_pause_pauses_running_entities_and_sigterms_hooks(tmp_path: Path) -> None:
     workflow = tmp_path / "workflow.yaml"
     _write(
         workflow,
@@ -769,9 +769,11 @@ phases:
         to: done
         cmd: >
           python -c "import pathlib, signal, sys, time;
+          entity = pathlib.Path(sys.argv[1]).name;
+          sys.exit(0) if entity == 'waiting.txt' else None;
           marker = pathlib.Path('global-pause-term.txt');
           signal.signal(signal.SIGTERM, lambda *_args: (marker.write_text('terminated', encoding='utf-8'), sys.exit(0)));
-          time.sleep(30)"
+          time.sleep(30)" "$INPUT_ENTITY"
 """,
     )
     _write(tmp_path / "tasks" / "new" / "running.txt", "payload")
@@ -800,12 +802,8 @@ phases:
                 async with session.post(f"{base_url}/workflow/pause") as response:
                     paused = await response.json()
                 assert response.status == 200
-                assert paused["paused_entities"] == 2
-                assert {entity["id"] for entity in paused["entities"]} == {
-                    "running.txt",
-                    "waiting.txt",
-                }
-                assert all(entity["paused"] for entity in paused["entities"])
+                assert paused["workflow_pause_state"] == "paused"
+                assert paused["paused_entities"] == 1
 
                 await _wait_for_path(tmp_path / "global-pause-term.txt")
 
@@ -820,7 +818,7 @@ phases:
 
                 waiting = await _wait_for_entity(session, base_url, "waiting.txt")
                 assert running["paused"] is True
-                assert waiting["paused"] is True
+                assert waiting["paused"] is False
                 assert running["state"] == "new"
                 assert waiting["state"] == "new"
                 assert not (tmp_path / "tasks" / "done" / "running.txt").exists()
@@ -828,7 +826,19 @@ phases:
 
                 async with session.get(f"{base_url}/status/workflow") as response:
                     workflow_status = await response.json()
-                assert workflow_status["paused_entities"] == 2
+                assert workflow_status["workflow_pause_state"] == "paused"
+                assert workflow_status["paused_entities"] == 1
+
+                async with session.post(f"{base_url}/workflow/resume") as response:
+                    resumed = await response.json()
+                assert response.status == 200
+                assert resumed["workflow_pause_state"] == "running"
+                assert resumed["paused_entities"] == 1
+
+                await _wait_for_path(tmp_path / "tasks" / "done" / "waiting.txt")
+                running = await _wait_for_entity(session, base_url, "running.txt")
+                assert running["paused"] is True
+                assert (tmp_path / "tasks" / "new" / "running.txt").exists()
         finally:
             server_task.cancel()
             with suppress(asyncio.CancelledError):

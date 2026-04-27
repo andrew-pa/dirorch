@@ -154,7 +154,8 @@ DIRORCH_WEB_CORS_ORIGINS=http://console.example.test:5173 dirorch ./workflow.yam
 Available endpoints:
 
 - `GET /workflow`: workflow structure, phase order, states, transitions, and configured hooks
-- `POST /workflow/pause`: emergency stop; pause all known entities and terminate running entity hooks
+- `POST /workflow/pause`: emergency stop; pause workflow processing and terminate running entity hooks
+- `POST /workflow/resume`: resume workflow processing without changing per-entity pause state
 - `GET /status/workflow`: persisted runtime snapshot, entity counts, locks, pauses, and current execution activity
 - `GET /status/entities`: entity list with phase/state, lock state, pause state, and processing flag
 - `GET /entity/{id}`: entity metadata plus file contents
@@ -177,7 +178,8 @@ Pause behavior:
 - Paused entities are excluded from workflow transitions until they are resumed.
 - Pauses are persisted separately from runtime state in `${root}/.dirorch_paused.json`.
 - Pausing a running entity sends `SIGTERM` to the active shell command and leaves the entity in place.
-- The global pause endpoint applies the same pause behavior to every known entity.
+- The global pause endpoint pauses the workflow engine, marks only currently running entities paused, and waits for active entity subprocesses to stop before reporting the engine paused.
+- Resuming the workflow engine does not resume any individually paused entities.
 - Resuming an entity changes eligibility for the next workflow pass; it does not force an immediate run.
 
 - The generic `/file` API cannot modify Dirorch-managed entity directories, `${root}/entity_logs/`, the runtime state file, the lock file, or the pause file.

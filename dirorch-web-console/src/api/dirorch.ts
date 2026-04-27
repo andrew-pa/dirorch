@@ -56,6 +56,12 @@ export async function pauseWorkflow() {
   })
 }
 
+export async function resumeWorkflow() {
+  return requestJson<WorkflowPausePayload>('/workflow/resume', {
+    method: 'POST',
+  })
+}
+
 export async function getEntity(entityId: string) {
   return requestJson<EntityDetail>(`/entity/${encodeURIComponent(entityId)}`)
 }

@@ -271,7 +271,7 @@ Fields:
 
 Fields:
 
-- `runner_state: "idle" | "running" | "stopped" | "failed"`
+- `runner_state: "idle" | "running" | "paused" | "stopped" | "failed"`
 - `current_phase: string | null`
 - `current_phase_mode: string | null`
 - `activity: object`
@@ -377,22 +377,25 @@ Errors:
 
 ### POST `/workflow/pause`
 
-Emergency stop workflow processing by pausing every known entity.
+Emergency stop workflow processing.
 
 Request body: none.
 
 Operational semantics:
 
-- All known entities are marked paused in `${root}/.dirorch_paused.json`.
+- The workflow engine enters global pause state and stops scheduling transitions.
+- Entities with active hook subprocesses are marked paused in `${root}/.dirorch_paused.json`.
 - Running entity hook commands receive `SIGTERM` through the same pause path as `PUT /entity/{id}/pause`.
-- Paused entities remain in place and are skipped by future workflow transition selection until individually resumed.
+- The response is returned after active entity subprocesses have stopped and the workflow engine has reached paused state.
+- Entities that were not running are not marked paused.
 - The operation is idempotent.
 
 Response `200`:
 
 ```json
 {
-  "paused_entities": 2,
+  "workflow_pause_state": "paused",
+  "paused_entities": 1,
   "entities": [
     {
       "id": "task.txt",
@@ -409,12 +412,42 @@ Response `200`:
 
 Fields:
 
+- `workflow_pause_state: "running" | "pausing" | "paused"`
 - `paused_entities: integer`
+  Count of entities paused by this request.
 - `entities: array<EntitySummary>`
 
 Errors:
 
 - `500` if pause state cannot be written
+
+### POST `/workflow/resume`
+
+Resume workflow processing without changing per-entity pause state.
+
+Request body: none.
+
+Operational semantics:
+
+- The workflow engine leaves global pause state and may continue processing eligible entities.
+- Entities paused before or during emergency stop remain individually paused until resumed through `PUT /entity/{id}/pause`.
+
+Response `200`:
+
+```json
+{
+  "workflow_pause_state": "running",
+  "paused_entities": 1,
+  "entities": []
+}
+```
+
+Fields:
+
+- `workflow_pause_state: "running" | "pausing" | "paused"`
+- `paused_entities: integer`
+  Count of currently paused entities after resume.
+- `entities: array<EntitySummary>`
 
 ### GET `/status/workflow`
 
@@ -439,6 +472,7 @@ Response `200`:
   },
   "locked_entities": 1,
   "paused_entities": 0,
+  "workflow_pause_state": "running",
   "execution": {
     "runner_state": "idle",
     "current_phase": "tasks",
@@ -467,6 +501,7 @@ Fields:
   - `_failed` is always included
 - `locked_entities: integer`
 - `paused_entities: integer`
+- `workflow_pause_state: "running" | "pausing" | "paused"`
 - `execution: ExecutionStatus`
 
 Operational semantics:

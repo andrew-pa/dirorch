@@ -40,10 +40,15 @@ EntityCursorSaver = Callable[[str, str], None]
 EntityCursorClearer = Callable[[], None]
 EntityLockChecker = Callable[[str], bool]
 EntityPauseChecker = Callable[[str], bool]
+WorkflowPauseChecker = Callable[[], bool]
 
 
 class EntityPausedSignal(Exception):
     """Internal control flow used to stop entity processing when paused."""
+
+
+class WorkflowPausedSignal(Exception):
+    """Internal control flow used to stop workflow processing when globally paused."""
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ class PhaseProcessorDeps:
     execution_observer: NullExecutionObserver
     is_entity_locked: EntityLockChecker
     is_entity_paused: EntityPauseChecker
+    is_workflow_pause_requested: WorkflowPauseChecker
     entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
 
@@ -77,6 +83,7 @@ class PhaseProcessor:
         self._execution_observer = deps.execution_observer
         self._is_entity_locked = deps.is_entity_locked
         self._is_entity_paused = deps.is_entity_paused
+        self._is_workflow_pause_requested = deps.is_workflow_pause_requested
         self._entity_log_emitter = deps.entity_log_emitter
         self.config = config
 
@@ -87,7 +94,9 @@ class PhaseProcessor:
         self._execution_observer.phase_started(self.config.name, self.config.mode)
         self._logger.info("Processing phase '%s' (mode: %s)", self.config.name, self.config.mode)
         try:
+            self._ensure_workflow_not_paused()
             moved_total = await self._run()
+            self._ensure_workflow_not_paused()
             await self._run_completions()
             self._logger.info(
                 "Phase '%s' reached fixpoint; transitions=%d", self.config.name, moved_total
@@ -98,6 +107,7 @@ class PhaseProcessor:
 
     async def _run_completions(self) -> None:
         for index, hook in enumerate(self.config.completions, start=1):
+            self._ensure_workflow_not_paused()
             context = f"completion hook {self.config.name}[{index}]"
             self._logger.info("Running %s", context)
             self._execution_observer.completion_started(self.config.name, index)
@@ -197,6 +207,16 @@ class PhaseProcessor:
                     destination_state=self._configured_destination_state(transition),
                 )
             return self._paused_transition_result()
+        except WorkflowPausedSignal:
+            if transition_started:
+                await self._emit_entity_event(
+                    entity.name,
+                    kind="transition.paused",
+                    source_state=transition.source,
+                    destination_state=self._configured_destination_state(transition),
+                    metadata={"reason": "workflow paused"},
+                )
+            raise
 
     def _transition_context(self, transition: TransitionConfig, entity: Path) -> str:
         return (
@@ -447,8 +467,13 @@ class PhaseProcessor:
         return transition.destination.constant
 
     def _ensure_entity_not_paused(self, entity_id: str) -> None:
+        self._ensure_workflow_not_paused()
         if self._is_entity_paused(entity_id):
             raise EntityPausedSignal()
+
+    def _ensure_workflow_not_paused(self) -> None:
+        if self._is_workflow_pause_requested():
+            raise WorkflowPausedSignal()
 
     def _idle_transition_result(self) -> TransitionResult:
         return TransitionResult(
@@ -812,6 +837,7 @@ class WorkflowEngine:
         execution_observer: NullExecutionObserver | None = None
         is_entity_locked: EntityLockChecker | None = None
         is_entity_paused: EntityPauseChecker | None = None
+        is_workflow_pause_requested: WorkflowPauseChecker | None = None
         entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
     def __init__(
@@ -830,6 +856,7 @@ class WorkflowEngine:
         execution_observer = deps.execution_observer or NullExecutionObserver()
         is_entity_locked = deps.is_entity_locked or (lambda _entity_id: False)
         is_entity_paused = deps.is_entity_paused or (lambda _entity_id: False)
+        is_workflow_pause_requested = deps.is_workflow_pause_requested or (lambda: False)
         self._phase_processor_deps = PhaseProcessorDeps(
             hook_runner=deps.hook_runner,
             entities=deps.entities,
@@ -842,25 +869,30 @@ class WorkflowEngine:
             execution_observer=execution_observer,
             is_entity_locked=is_entity_locked,
             is_entity_paused=is_entity_paused,
+            is_workflow_pause_requested=is_workflow_pause_requested,
             entity_log_emitter=deps.entity_log_emitter,
         )
         self._execution_observer = execution_observer
+        self._is_workflow_pause_requested = is_workflow_pause_requested
 
     def _processor_for_phase(self, phase: PhaseConfig) -> PhaseProcessor:
         return PHASE_PROCESSOR_FOR_MODE[phase.mode](self._phase_processor_deps, phase)
 
     async def run(self) -> None:
+        self._ensure_workflow_not_paused()
         self._entities.ensure_layout()
         if not self._did_run_init:
             await self._run_init()
             self._did_run_init = True
 
+        self._ensure_workflow_not_paused()
         phase_order = self._config.phase_order
         first_phase = phase_order[0]
         self._snapshot = self._load_or_init_snapshot(phase_order)
 
         wrapped_to_first = False
         while True:
+            self._ensure_workflow_not_paused()
             phase_name = self._snapshot.current_phase
             processor = self._processor_for_phase(self._phases[phase_name])
             moved = await processor.run_phase()
@@ -882,6 +914,7 @@ class WorkflowEngine:
                 wrapped_to_first = True
 
     async def _run_jump(self, target_phase: str, source_phase: str) -> None:
+        self._ensure_workflow_not_paused()
         if target_phase == source_phase:
             self._logger.warning("Ignoring self-jump from phase '%s'", source_phase)
             return
@@ -923,6 +956,7 @@ class WorkflowEngine:
         if hook is None:
             return
 
+        self._ensure_workflow_not_paused()
         context = "init hook"
         self._logger.info("Running %s", context)
         self._execution_observer.init_started()
@@ -932,6 +966,10 @@ class WorkflowEngine:
                 raise WorkflowError(f"{context} failed after retries")
         finally:
             self._execution_observer.init_finished()
+
+    def _ensure_workflow_not_paused(self) -> None:
+        if self._is_workflow_pause_requested():
+            raise WorkflowPausedSignal()
 
     def _load_or_init_snapshot(self, phase_order: tuple[str, ...]) -> RuntimeSnapshot:
         snapshot = self._state.load_snapshot()

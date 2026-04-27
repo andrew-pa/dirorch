@@ -20,7 +20,7 @@ from .execution import ExecutionStatusTracker
 from .files import FileStore
 from .locks import EntityLockStore
 from .models import NamedTargetConfig, WorkflowConfig
-from .pauses import ActiveShellCommandRegistry, EntityPauseStore
+from .pauses import ActiveShellCommandRegistry, EntityPauseStore, WorkflowPauseController
 from .state import RuntimeStateStore
 from .errors import ConflictError, NotFoundError, ValidationError
 
@@ -243,24 +243,6 @@ class EntityAdminService:
         )
         return self.get_entity(entity_id)
 
-    async def pause_all(self) -> dict[str, Any]:
-        entities = self._entities.list_all_entities()
-        entity_ids = {entity.name for entity in entities}
-        async with self._coordinator.mutate():
-            for entity_id in entity_ids:
-                self._pauses.set_paused(entity_id, True)
-        await self._command_registry.terminate_for_entities(entity_ids)
-        await asyncio.gather(
-            *(
-                self._emit_entity_event(entity_id, "entity.paused")
-                for entity_id in entity_ids
-            )
-        )
-        return {
-            "paused_entities": len(entity_ids),
-            "entities": self.list_entities(),
-        }
-
     async def delete_entity(self, entity_id: str) -> None:
         entity = self._require_unique_entity(entity_id)
         if self._tracker.is_processing(entity_id):
@@ -370,6 +352,62 @@ class FileAdminService:
             self._files.delete(relative_path)
 
 
+class WorkflowControlService:
+    def __init__(
+        self,
+        entities: EntityAdminService,
+        pauses: EntityPauseStore,
+        coordinator: MutationCoordinator,
+        command_registry: ActiveShellCommandRegistry,
+        workflow_pause: WorkflowPauseController,
+        entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter(),
+    ) -> None:
+        self._entities = entities
+        self._pauses = pauses
+        self._coordinator = coordinator
+        self._command_registry = command_registry
+        self._workflow_pause = workflow_pause
+        self._entity_log_emitter = entity_log_emitter
+
+    async def pause(self) -> dict[str, Any]:
+        await self._workflow_pause.request_pause()
+        entity_ids = await self._command_registry.active_entity_ids()
+        async with self._coordinator.mutate():
+            for entity_id in entity_ids:
+                self._pauses.set_paused(entity_id, True)
+        await self._command_registry.terminate_for_entities(entity_ids)
+        await self._command_registry.wait_until_idle()
+        await self._workflow_pause.mark_paused()
+        await asyncio.gather(
+            *(
+                self._emit_entity_event(entity_id, "entity.paused")
+                for entity_id in entity_ids
+            )
+        )
+        return {
+            "workflow_pause_state": self._workflow_pause.state(),
+            "paused_entities": len(entity_ids),
+            "entities": self._entities.list_entities(),
+        }
+
+    async def resume(self) -> dict[str, Any]:
+        await self._workflow_pause.resume()
+        return {
+            "workflow_pause_state": self._workflow_pause.state(),
+            "paused_entities": len(self._pauses.list_paused()),
+            "entities": self._entities.list_entities(),
+        }
+
+    async def _emit_entity_event(self, entity_id: str, kind: str) -> None:
+        await self._entity_log_emitter.emit(
+            EntityLogEvent(
+                entity_id=entity_id,
+                timestamp=utc_now(),
+                kind=kind,
+            )
+        )
+
+
 class WorkflowStatusService:
     def __init__(
         self,
@@ -378,6 +416,7 @@ class WorkflowStatusService:
         entities: EntityAdminService,
         locks: EntityLockStore,
         pauses: EntityPauseStore,
+        workflow_pause: WorkflowPauseController,
         config: WorkflowConfig,
     ) -> None:
         self._state = state
@@ -385,6 +424,7 @@ class WorkflowStatusService:
         self._entities = entities
         self._locks = locks
         self._pauses = pauses
+        self._workflow_pause = workflow_pause
         self._config = config
 
     def workflow_status(self) -> dict[str, Any]:
@@ -426,6 +466,7 @@ class WorkflowStatusService:
             "counts": counts,
             "locked_entities": len(self._locks.list_locks()),
             "paused_entities": len(self._pauses.list_paused()),
+            "workflow_pause_state": self._workflow_pause.state(),
             "execution": self._tracker.snapshot(),
         }
 

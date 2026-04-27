@@ -26,17 +26,18 @@ from .files import FileStore
 from .hooks import HookRunner, HookRunnerConfig
 from .locks import EntityLockStore
 from .models import CliOptions
-from .pauses import ActiveShellCommandRegistry, EntityPauseStore
+from .pauses import ActiveShellCommandRegistry, EntityPauseStore, WorkflowPauseController
 from .services import (
     EntityAdminService,
     FileAdminService,
     EntityLogService,
     MutationCoordinator,
     WorkflowDefinitionService,
+    WorkflowControlService,
     WorkflowStatusService,
 )
 from .state import RuntimeStateStore
-from .workflow import WorkflowEngine
+from .workflow import WorkflowEngine, WorkflowPausedSignal
 from .web import WebServer, build_web_app
 from .web.app import WebServices
 
@@ -105,12 +106,14 @@ class WorkflowRunner:
         entities: EntityStore,
         logger: logging.Logger,
         tracker: ExecutionStatusTracker,
+        workflow_pause: WorkflowPauseController,
         watch: bool,
     ) -> None:
         self._engine = engine
         self._entities = entities
         self._logger = logger
         self._tracker = tracker
+        self._workflow_pause = workflow_pause
         self._watch = watch
 
     async def run(self) -> None:
@@ -118,9 +121,16 @@ class WorkflowRunner:
             if self._watch:
                 await self._run_watch_loop()
             else:
-                self._tracker.runner_started()
-                await self._engine.run()
-                self._tracker.runner_stopped()
+                while True:
+                    await self._workflow_pause.wait_if_paused()
+                    self._tracker.runner_started()
+                    try:
+                        await self._engine.run()
+                    except WorkflowPausedSignal:
+                        self._tracker.runner_paused()
+                        continue
+                    self._tracker.runner_stopped()
+                    return
         except asyncio.CancelledError:
             self._tracker.runner_stopped()
             raise
@@ -130,13 +140,19 @@ class WorkflowRunner:
 
     async def _run_watch_loop(self) -> None:
         while True:
+            await self._workflow_pause.wait_if_paused()
             self._tracker.runner_started()
-            await self._engine.run()
+            try:
+                await self._engine.run()
+            except WorkflowPausedSignal:
+                self._tracker.runner_paused()
+                continue
             previous_layout = self._entities.entity_layout()
             self._logger.info("Watch mode idle; waiting for entity layout changes")
             self._tracker.runner_waiting()
 
             while True:
+                await self._workflow_pause.wait_if_paused()
                 await asyncio.sleep(WATCH_POLL_INTERVAL_SECONDS)
                 current_layout = self._entities.entity_layout()
                 if current_layout == previous_layout:
@@ -161,7 +177,11 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
     state = RuntimeStateStore(options.root, options.state_file)
     locks = EntityLockStore(options.root, LOCKS_FILE_NAME)
     pauses = EntityPauseStore(options.root, PAUSED_FILE_NAME)
-    command_registry = ActiveShellCommandRegistry(pauses.is_paused)
+    workflow_pause = WorkflowPauseController()
+    command_registry = ActiveShellCommandRegistry(
+        lambda entity_id: pauses.is_paused(entity_id)
+        or workflow_pause.is_pause_requested()
+    )
     entities = EntityStore(options.root, config)
     files = FileStore(
         options.root,
@@ -191,6 +211,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             cwd=config.cwd,
             entity_log_emitter=entity_log_emitter,
             is_entity_paused=pauses.is_paused,
+            is_workflow_pause_requested=workflow_pause.is_pause_requested,
             command_registry=command_registry,
         )
     )
@@ -204,6 +225,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             execution_observer=tracker,
             is_entity_locked=locks.is_locked,
             is_entity_paused=pauses.is_paused,
+            is_workflow_pause_requested=workflow_pause.is_pause_requested,
             entity_log_emitter=entity_log_emitter,
         ),
     )
@@ -212,6 +234,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
         entities=entities,
         logger=logger,
         tracker=tracker,
+        workflow_pause=workflow_pause,
         watch=options.watch,
     )
 
@@ -234,12 +257,21 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
         )
         services = WebServices(
             definition=WorkflowDefinitionService(config, workflow_path),
+            control=WorkflowControlService(
+                entities=entity_service,
+                pauses=pauses,
+                coordinator=coordinator,
+                command_registry=command_registry,
+                workflow_pause=workflow_pause,
+                entity_log_emitter=entity_log_emitter,
+            ),
             status=WorkflowStatusService(
                 state=state,
                 tracker=tracker,
                 entities=entity_service,
                 locks=locks,
                 pauses=pauses,
+                workflow_pause=workflow_pause,
                 config=config,
             ),
             entities=entity_service,

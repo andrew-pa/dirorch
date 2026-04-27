@@ -74,6 +74,51 @@ class EntityPauseStore:
         )
 
 
+class WorkflowPauseController:
+    """Coordinates process-wide workflow pause state."""
+
+    def __init__(self) -> None:
+        self._pause_requested = False
+        self._paused = False
+        self._condition = asyncio.Condition()
+
+    def is_pause_requested(self) -> bool:
+        return self._pause_requested
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def state(self) -> str:
+        if self._paused:
+            return "paused"
+        if self._pause_requested:
+            return "pausing"
+        return "running"
+
+    async def request_pause(self) -> None:
+        async with self._condition:
+            self._pause_requested = True
+            self._paused = False
+            self._condition.notify_all()
+
+    async def mark_paused(self) -> None:
+        async with self._condition:
+            if self._pause_requested:
+                self._paused = True
+            self._condition.notify_all()
+
+    async def resume(self) -> None:
+        async with self._condition:
+            self._pause_requested = False
+            self._paused = False
+            self._condition.notify_all()
+
+    async def wait_if_paused(self) -> None:
+        async with self._condition:
+            while self._pause_requested:
+                await self._condition.wait()
+
+
 @dataclass
 class ActiveShellCommandHandle:
     terminate: Callable[[], None]
@@ -87,10 +132,10 @@ class ActiveShellCommandHandle:
 class ActiveShellCommandRegistry:
     """Tracks per-entity shell commands so pause can terminate them promptly."""
 
-    def __init__(self, is_entity_paused: Callable[[str], bool]) -> None:
-        self._is_entity_paused = is_entity_paused
+    def __init__(self, should_pause: Callable[[str], bool]) -> None:
+        self._should_pause = should_pause
         self._processes: dict[str, dict[int, ActiveShellCommandHandle]] = {}
-        self._lock = asyncio.Lock()
+        self._condition = asyncio.Condition()
 
     async def register(
         self,
@@ -98,10 +143,11 @@ class ActiveShellCommandRegistry:
         terminate: Callable[[], None],
     ) -> ActiveShellCommandHandle:
         handle = ActiveShellCommandHandle(terminate=terminate)
-        async with self._lock:
+        async with self._condition:
             handles = self._processes.setdefault(entity_id, {})
             handles[id(handle)] = handle
-            paused = self._is_entity_paused(entity_id)
+            paused = self._should_pause(entity_id)
+            self._condition.notify_all()
         if paused:
             handle.request_pause()
         return handle
@@ -111,22 +157,23 @@ class ActiveShellCommandRegistry:
         entity_id: str,
         handle: ActiveShellCommandHandle,
     ) -> None:
-        async with self._lock:
+        async with self._condition:
             handles = self._processes.get(entity_id)
             if handles is None:
                 return
             handles.pop(id(handle), None)
             if not handles:
                 self._processes.pop(entity_id, None)
+            self._condition.notify_all()
 
     async def terminate_for_entity(self, entity_id: str) -> None:
-        async with self._lock:
+        async with self._condition:
             handles = list(self._processes.get(entity_id, {}).values())
         for handle in handles:
             handle.request_pause()
 
     async def terminate_for_entities(self, entity_ids: set[str]) -> None:
-        async with self._lock:
+        async with self._condition:
             handles = [
                 handle
                 for entity_id in entity_ids
@@ -134,6 +181,15 @@ class ActiveShellCommandRegistry:
             ]
         for handle in handles:
             handle.request_pause()
+
+    async def active_entity_ids(self) -> set[str]:
+        async with self._condition:
+            return set(self._processes)
+
+    async def wait_until_idle(self) -> None:
+        async with self._condition:
+            while self._processes:
+                await self._condition.wait()
 
 
 def terminate_process_group(pid: int | None) -> None:

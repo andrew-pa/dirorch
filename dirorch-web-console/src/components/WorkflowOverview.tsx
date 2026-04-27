@@ -44,11 +44,13 @@ interface WorkflowOverviewProps {
   entities: EntitySummary[]
   isRefreshing: boolean
   isPausingWorkflow: boolean
+  isResumingWorkflow: boolean
   movingEntityId: string | null
   onCreateEntity: (phase: string, state: string) => void
   onMoveEntity: (entity: EntitySummary, phase: string, state: string) => void
   onPauseWorkflow: () => void
   onRefresh: () => void
+  onResumeWorkflow: () => void
   onSelectEntity: (entity: EntitySummary) => void
   onOpenSettings: () => void
   status: WorkflowStatusPayload
@@ -59,11 +61,13 @@ export function WorkflowOverview({
   entities,
   isRefreshing,
   isPausingWorkflow,
+  isResumingWorkflow,
   movingEntityId,
   onCreateEntity,
   onMoveEntity,
   onPauseWorkflow,
   onRefresh,
+  onResumeWorkflow,
   onSelectEntity,
   onOpenSettings,
   status,
@@ -75,8 +79,10 @@ export function WorkflowOverview({
   const [runtimeCollapsed, setRuntimeCollapsed] = useState(false)
   const cursorEntity = findCursorEntity(status.runtime_snapshot, entities)
   const activeIds = runnerEntityIds(status.execution)
+  const workflowPaused = status.workflow_pause_state === 'paused'
+  const workflowPausing = status.workflow_pause_state === 'pausing'
   const runtimeSummary = [
-    status.execution.runner_state,
+    workflowPaused ? 'paused' : status.execution.runner_state,
     activityLabel(status.execution),
     status.execution.current_phase
       ? `${status.execution.current_phase}${status.execution.current_phase_mode ? `/${status.execution.current_phase_mode}` : ''}`
@@ -95,19 +101,35 @@ export function WorkflowOverview({
           title={<h1 className="console-header__title">{workflow.workflow_file}</h1>}
           actions={
             <>
-              <button
-                className="button button--danger"
-                type="button"
-                disabled={isPausingWorkflow || entities.length === 0}
-                onClick={onPauseWorkflow}
-              >
-                {isPausingWorkflow ? (
-                  <LoaderCircle className="spin" size={16} />
-                ) : (
-                  <Pause size={16} />
-                )}
-                Emergency stop
-              </button>
+              {workflowPaused ? (
+                <button
+                  className="button button--primary"
+                  type="button"
+                  disabled={isResumingWorkflow}
+                  onClick={onResumeWorkflow}
+                >
+                  {isResumingWorkflow ? (
+                    <LoaderCircle className="spin" size={16} />
+                  ) : (
+                    <Play size={16} />
+                  )}
+                  Resume workflow
+                </button>
+              ) : (
+                <button
+                  className="button button--danger"
+                  type="button"
+                  disabled={isPausingWorkflow || workflowPausing}
+                  onClick={onPauseWorkflow}
+                >
+                  {isPausingWorkflow || workflowPausing ? (
+                    <LoaderCircle className="spin" size={16} />
+                  ) : (
+                    <Pause size={16} />
+                  )}
+                  Emergency stop
+                </button>
+              )}
               <button className="button button--ghost" type="button" onClick={onRefresh}>
                 <RefreshCw className={isRefreshing ? 'spin' : undefined} size={16} />
                 Refresh
@@ -145,7 +167,8 @@ export function WorkflowOverview({
               label="Runtime"
               value={
                 <>
-                  {status.execution.runner_state} · {activityLabel(status.execution)}
+                  {workflowPaused ? 'paused' : status.execution.runner_state} ·{' '}
+                  {workflowPausing ? 'pausing' : activityLabel(status.execution)}
                 </>
               }
               meta={

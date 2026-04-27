@@ -89,6 +89,11 @@ class ExecutionStatusTracker(NullExecutionObserver):
             self._runner_state = "idle"
         self._clear_activity()
 
+    def runner_paused(self) -> None:
+        if self._runner_state != "failed":
+            self._runner_state = "paused"
+        self._clear_activity()
+
     def runner_stopped(self) -> None:
         if self._runner_state != "failed":
             self._runner_state = "stopped"
