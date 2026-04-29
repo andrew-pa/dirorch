@@ -13,7 +13,7 @@ import {
   Save,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   ApiError,
@@ -37,12 +37,21 @@ import { LinkedFileEditor } from './LinkedFileEditor'
 import { EmptyState } from './ui/EmptyState'
 import { SectionHeader } from './ui/SectionHeader'
 
+export type EntityPanelTab = 'content' | 'logs'
+export type EntityFullscreenPane = 'file' | 'logs' | null
+
 interface EntityEditorModalProps {
+  activeTab?: EntityPanelTab
+  fullscreenPane?: EntityFullscreenPane
   initialPhase: string
   initialState: string
   mode: 'create' | 'edit'
+  onActiveTabChange?: (activeTab: EntityPanelTab) => void
   onClose: () => void
+  onFullscreenPaneChange?: (fullscreenPane: EntityFullscreenPane) => void
+  onSelectedFilePathChange?: (selectedFilePath: string | null) => void
   presentation?: 'modal' | 'panel'
+  selectedFilePath?: string | null
   summary?: EntitySummary
   workflow: WorkflowDefinition
 }
@@ -66,11 +75,17 @@ const EMPTY_DRAFT: EntityDraft = {
 }
 
 export function EntityEditorModal({
+  activeTab: controlledActiveTab,
+  fullscreenPane: controlledFullscreenPane,
   initialPhase,
   initialState,
   mode,
+  onActiveTabChange,
   onClose,
+  onFullscreenPaneChange,
+  onSelectedFilePathChange,
   presentation = 'modal',
+  selectedFilePath: controlledSelectedFilePath,
   summary,
   workflow,
 }: EntityEditorModalProps) {
@@ -90,7 +105,7 @@ export function EntityEditorModal({
     phase: initialPhase,
     state: initialState,
   })
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
+  const [localSelectedFilePath, setLocalSelectedFilePath] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isPausePending, setIsPausePending] = useState(false)
@@ -98,11 +113,48 @@ export function EntityEditorModal({
   const [lockState, setLockState] = useState<'idle' | 'pending' | 'ready' | 'error'>(
     mode === 'create' ? 'ready' : 'idle',
   )
-  const [activeTab, setActiveTab] = useState<'content' | 'logs'>('content')
-  const [fullscreenPane, setFullscreenPane] = useState<'file' | 'logs' | null>(null)
+  const [localActiveTab, setLocalActiveTab] = useState<EntityPanelTab>('content')
+  const [localFullscreenPane, setLocalFullscreenPane] = useState<EntityFullscreenPane>(null)
 
   const loadedEntityRef = useRef<EntityDetail | null>(null)
   const ownedLockRef = useRef(false)
+  const activeTab = controlledActiveTab ?? localActiveTab
+  const selectedFilePath =
+    controlledSelectedFilePath === undefined
+      ? localSelectedFilePath
+      : controlledSelectedFilePath
+  const fullscreenPane =
+    controlledFullscreenPane === undefined ? localFullscreenPane : controlledFullscreenPane
+
+  const setActiveTab = useCallback(
+    (nextActiveTab: EntityPanelTab) => {
+      if (controlledActiveTab === undefined) {
+        setLocalActiveTab(nextActiveTab)
+      }
+      onActiveTabChange?.(nextActiveTab)
+    },
+    [controlledActiveTab, onActiveTabChange],
+  )
+
+  const setSelectedFilePath = useCallback(
+    (nextSelectedFilePath: string | null) => {
+      if (controlledSelectedFilePath === undefined) {
+        setLocalSelectedFilePath(nextSelectedFilePath)
+      }
+      onSelectedFilePathChange?.(nextSelectedFilePath)
+    },
+    [controlledSelectedFilePath, onSelectedFilePathChange],
+  )
+
+  const setFullscreenPane = useCallback(
+    (nextFullscreenPane: EntityFullscreenPane) => {
+      if (controlledFullscreenPane === undefined) {
+        setLocalFullscreenPane(nextFullscreenPane)
+      }
+      onFullscreenPaneChange?.(nextFullscreenPane)
+    },
+    [controlledFullscreenPane, onFullscreenPaneChange],
+  )
 
   useEffect(() => {
     if (mode !== 'create') {
@@ -111,11 +163,11 @@ export function EntityEditorModal({
 
     loadedEntityRef.current = null
     setSaveError(null)
-    setSelectedFilePath(null)
+    setLocalSelectedFilePath(null)
     setIsEditing(true)
     setLockState('ready')
-    setActiveTab('content')
-    setFullscreenPane(null)
+    setLocalActiveTab('content')
+    setLocalFullscreenPane(null)
     setDraft({
       ...EMPTY_DRAFT,
       phase: initialPhase,
@@ -124,9 +176,16 @@ export function EntityEditorModal({
   }, [initialPhase, initialState, mode])
 
   useEffect(() => {
-    setActiveTab('content')
-    setFullscreenPane(null)
-  }, [entityId, mode])
+    if (controlledActiveTab === undefined) {
+      setLocalActiveTab('content')
+    }
+    if (controlledSelectedFilePath === undefined) {
+      setLocalSelectedFilePath(null)
+    }
+    if (controlledFullscreenPane === undefined) {
+      setLocalFullscreenPane(null)
+    }
+  }, [controlledActiveTab, controlledFullscreenPane, controlledSelectedFilePath, entityId, mode])
 
   useEffect(() => {
     if (mode !== 'edit' || !detailQuery.data) {
@@ -214,9 +273,20 @@ export function EntityEditorModal({
     if (!selectedFilePath && fullscreenPane === 'file') {
       setFullscreenPane(null)
     }
-  }, [fullscreenPane, selectedFilePath])
+  }, [fullscreenPane, selectedFilePath, setFullscreenPane])
 
   useEffect(() => {
+    if (mode === 'edit' && !detailQuery.data) {
+      return
+    }
+
+    if (activeTab !== 'content') {
+      if (selectedFilePath) {
+        setSelectedFilePath(null)
+      }
+      return
+    }
+
     const parsedJson =
       draft.format === 'json' ? tryParseJson(draft.rawContent) : { ok: false as const }
     const pathReferences =
@@ -237,7 +307,16 @@ export function EntityEditorModal({
     }
 
     setSelectedFilePath(pathReferences[0].value)
-  }, [draft.editorMode, draft.format, draft.rawContent, selectedFilePath])
+  }, [
+    activeTab,
+    detailQuery.data,
+    draft.editorMode,
+    draft.format,
+    draft.rawContent,
+    mode,
+    selectedFilePath,
+    setSelectedFilePath,
+  ])
 
   const parsedJson =
     draft.format === 'json' ? tryParseJson(draft.rawContent) : { ok: false as const }
@@ -374,6 +453,11 @@ export function EntityEditorModal({
     setIsEditing(true)
   }
 
+  function handleActiveTabChange(nextActiveTab: EntityPanelTab) {
+    setFullscreenPane(null)
+    setActiveTab(nextActiveTab)
+  }
+
   return (
     <Dialog.Root
       modal={presentation !== 'panel'}
@@ -419,7 +503,7 @@ export function EntityEditorModal({
                       role="tab"
                       type="button"
                       aria-selected={activeTab === 'content'}
-                      onClick={() => setActiveTab('content')}
+                      onClick={() => handleActiveTabChange('content')}
                     >
                       Content
                     </button>
@@ -431,7 +515,7 @@ export function EntityEditorModal({
                       role="tab"
                       type="button"
                       aria-selected={activeTab === 'logs'}
-                      onClick={() => setActiveTab('logs')}
+                      onClick={() => handleActiveTabChange('logs')}
                     >
                       Logs
                     </button>

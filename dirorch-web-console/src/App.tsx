@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, LoaderCircle, Settings } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   ApiError,
@@ -19,7 +19,11 @@ import {
   setBackendEndpoint,
 } from './api/backendEndpoint'
 import type { EntitySummary } from './api/types'
-import { EntityEditorModal } from './components/EntityEditorModal'
+import {
+  EntityEditorModal,
+  type EntityFullscreenPane,
+  type EntityPanelTab,
+} from './components/EntityEditorModal'
 import { SettingsModal } from './components/SettingsModal'
 import { WorkflowOverview } from './components/WorkflowOverview'
 import { EmptyState } from './components/ui/EmptyState'
@@ -31,16 +35,27 @@ type ModalState =
       phase: string
       state: string
     }
-  | {
-      mode: 'edit'
-      summary: EntitySummary
-    }
   | null
+
+interface ConsoleNavigationState {
+  entityId: string | null
+  entityView: EntityPanelTab
+  selectedFilePath: string | null
+  fullscreenPane: EntityFullscreenPane
+}
+
+type NavigationHistoryMode = 'push' | 'replace'
+
+const ENTITY_PARAM = 'entity'
+const ENTITY_VIEW_PARAM = 'view'
+const ENTITY_FILE_PARAM = 'file'
+const FULLSCREEN_PARAM = 'fullscreen'
 
 export default function App() {
   const queryClient = useQueryClient()
   const defaultBackendEndpoint = getDefaultBackendEndpoint()
   const [backendEndpoint, setBackendEndpointState] = useState(getBackendEndpoint)
+  const [navigationState, setNavigationState] = useUrlNavigationState()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [modalState, setModalState] = useState<ModalState>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
@@ -74,6 +89,27 @@ export default function App() {
     queryFn: getEntities,
     refetchInterval: 2_000,
   })
+
+  const selectedEntitySummary =
+    navigationState.entityId && entitiesQuery.data
+      ? entitiesQuery.data.entities.find((entity) => entity.id === navigationState.entityId) ?? null
+      : null
+
+  useEffect(() => {
+    if (!entitiesQuery.data || !navigationState.entityId || selectedEntitySummary) {
+      return
+    }
+
+    setNavigationState(
+      {
+        entityId: null,
+        entityView: 'content',
+        selectedFilePath: null,
+        fullscreenPane: null,
+      },
+      'replace',
+    )
+  }, [entitiesQuery.data, navigationState.entityId, selectedEntitySummary, setNavigationState])
 
   const moveEntityMutation = useMutation({
     mutationFn: async ({
@@ -119,6 +155,7 @@ export default function App() {
   function handleBackendEndpointChange(nextEndpoint: string) {
     const normalizedEndpoint = setBackendEndpoint(nextEndpoint)
     setBackendEndpointState(normalizedEndpoint)
+    clearViewerNavigation()
     setModalState(null)
     setMoveError(null)
     setSettingsOpen(false)
@@ -128,6 +165,7 @@ export default function App() {
   function handleBackendEndpointReset() {
     const normalizedEndpoint = resetBackendEndpoint()
     setBackendEndpointState(normalizedEndpoint)
+    clearViewerNavigation()
     setModalState(null)
     setMoveError(null)
     setSettingsOpen(false)
@@ -182,6 +220,69 @@ export default function App() {
     } catch (error) {
       setMoveError(formatError(error))
     }
+  }
+
+  function clearViewerNavigation() {
+    setNavigationState(
+      {
+        entityId: null,
+        entityView: 'content',
+        selectedFilePath: null,
+        fullscreenPane: null,
+      },
+      'replace',
+    )
+  }
+
+  function handleSelectEntity(summary: EntitySummary) {
+    setModalState(null)
+    setNavigationState(
+      {
+        entityId: summary.id,
+        entityView: 'content',
+        selectedFilePath: null,
+        fullscreenPane: null,
+      },
+      'push',
+    )
+  }
+
+  function handleCreateEntity(phase: string, state: string) {
+    clearViewerNavigation()
+    setModalState({ mode: 'create', phase, state })
+  }
+
+  function handleEntityViewChange(entityView: EntityPanelTab) {
+    setNavigationState(
+      (current) => ({
+        ...current,
+        entityView,
+        selectedFilePath: entityView === 'content' ? current.selectedFilePath : null,
+        fullscreenPane: null,
+      }),
+      'replace',
+    )
+  }
+
+  function handleSelectedFilePathChange(selectedFilePath: string | null) {
+    setNavigationState(
+      (current) => ({
+        ...current,
+        selectedFilePath: current.entityView === 'content' ? selectedFilePath : null,
+        fullscreenPane: selectedFilePath ? current.fullscreenPane : null,
+      }),
+      'replace',
+    )
+  }
+
+  function handleFullscreenPaneChange(fullscreenPane: EntityFullscreenPane) {
+    setNavigationState(
+      (current) => ({
+        ...current,
+        fullscreenPane,
+      }),
+      'replace',
+    )
   }
 
   const loading =
@@ -247,7 +348,7 @@ export default function App() {
 
       <div
         className={
-          modalState && usePanelEditor
+          (modalState || selectedEntitySummary) && usePanelEditor
             ? 'app-workspace app-workspace--editor-open'
             : 'app-workspace'
         }
@@ -259,18 +360,18 @@ export default function App() {
             isResumingWorkflow={resumeWorkflowMutation.isPending}
             isRefreshing={statusQuery.isRefetching || entitiesQuery.isRefetching}
             movingEntityId={moveEntityMutation.isPending ? moveEntityMutation.variables?.entity.id ?? null : null}
-            onCreateEntity={(phase, state) => setModalState({ mode: 'create', phase, state })}
+            onCreateEntity={handleCreateEntity}
             onMoveEntity={(entity, phase, state) => void handleMoveEntity(entity, phase, state)}
             onOpenSettings={() => setSettingsOpen(true)}
             onPauseWorkflow={() => void handlePauseWorkflow()}
             onRefresh={() => void handleRefresh()}
             onResumeWorkflow={() => void handleResumeWorkflow()}
-            onSelectEntity={(summary) => setModalState({ mode: 'edit', summary })}
+            onSelectEntity={handleSelectEntity}
             status={statusQuery.data}
             workflow={workflowQuery.data}
           />
         </div>
-        {modalState && usePanelEditor ? (
+        {(modalState || selectedEntitySummary) && usePanelEditor ? (
           <div className="app-workspace__editor-slot" aria-hidden="true" />
         ) : null}
       </div>
@@ -289,22 +390,157 @@ export default function App() {
         />
       ) : null}
 
-      {modalState?.mode === 'edit' ? (
+      {selectedEntitySummary ? (
         <EntityEditorModal
-          initialPhase={modalState.summary.phase}
-          initialState={modalState.summary.state}
+          activeTab={navigationState.entityView}
+          fullscreenPane={navigationState.fullscreenPane}
+          initialPhase={selectedEntitySummary.phase}
+          initialState={selectedEntitySummary.state}
           mode="edit"
           presentation={usePanelEditor ? 'panel' : 'modal'}
-          summary={modalState.summary}
+          selectedFilePath={navigationState.selectedFilePath}
+          summary={selectedEntitySummary}
           workflow={workflowQuery.data}
+          onActiveTabChange={handleEntityViewChange}
           onClose={() => {
-            setModalState(null)
+            clearViewerNavigation()
             void handleRefresh()
           }}
+          onFullscreenPaneChange={handleFullscreenPaneChange}
+          onSelectedFilePathChange={handleSelectedFilePathChange}
         />
       ) : null}
     </>
   )
+}
+
+function useUrlNavigationState() {
+  const [navigationState, setNavigationStateValue] = useState(readUrlNavigationState)
+  const navigationStateRef = useRef(navigationState)
+
+  useEffect(() => {
+    navigationStateRef.current = navigationState
+  }, [navigationState])
+
+  useEffect(() => {
+    function handlePopState() {
+      const nextState = readUrlNavigationState()
+      navigationStateRef.current = nextState
+      setNavigationStateValue(nextState)
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  const setNavigationState = useCallback(
+    (
+      next:
+        | ConsoleNavigationState
+        | ((current: ConsoleNavigationState) => ConsoleNavigationState),
+      historyMode: NavigationHistoryMode = 'replace',
+    ) => {
+      const currentState = navigationStateRef.current
+      const nextState = typeof next === 'function' ? next(currentState) : next
+
+      navigationStateRef.current = nextState
+      writeUrlNavigationState(nextState, historyMode)
+      setNavigationStateValue(nextState)
+    },
+    [],
+  )
+
+  return [navigationState, setNavigationState] as const
+}
+
+function readUrlNavigationState(): ConsoleNavigationState {
+  if (typeof window === 'undefined') {
+    return createDefaultNavigationState()
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const entityId = params.get(ENTITY_PARAM)
+
+  if (!entityId) {
+    return createDefaultNavigationState()
+  }
+
+  const entityView: EntityPanelTab =
+    params.get(ENTITY_VIEW_PARAM) === 'logs' ? 'logs' : 'content'
+  const selectedFilePath =
+    entityView === 'content' ? emptyToNull(params.get(ENTITY_FILE_PARAM)) : null
+  const requestedFullscreen = params.get(FULLSCREEN_PARAM)
+  const fullscreenPane: EntityFullscreenPane =
+    requestedFullscreen === 'logs' && entityView === 'logs'
+      ? 'logs'
+      : requestedFullscreen === 'file' && entityView === 'content'
+        ? 'file'
+        : null
+
+  return {
+    entityId,
+    entityView,
+    selectedFilePath,
+    fullscreenPane,
+  }
+}
+
+function writeUrlNavigationState(
+  navigationState: ConsoleNavigationState,
+  historyMode: NavigationHistoryMode,
+) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const url = new URL(window.location.href)
+  url.searchParams.delete(ENTITY_PARAM)
+  url.searchParams.delete(ENTITY_VIEW_PARAM)
+  url.searchParams.delete(ENTITY_FILE_PARAM)
+  url.searchParams.delete(FULLSCREEN_PARAM)
+
+  if (navigationState.entityId) {
+    url.searchParams.set(ENTITY_PARAM, navigationState.entityId)
+
+    if (navigationState.entityView === 'logs') {
+      url.searchParams.set(ENTITY_VIEW_PARAM, 'logs')
+    }
+
+    if (navigationState.entityView === 'content' && navigationState.selectedFilePath) {
+      url.searchParams.set(ENTITY_FILE_PARAM, navigationState.selectedFilePath)
+    }
+
+    if (navigationState.fullscreenPane) {
+      url.searchParams.set(FULLSCREEN_PARAM, navigationState.fullscreenPane)
+    }
+  }
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`
+
+  if (nextUrl === currentUrl) {
+    return
+  }
+
+  if (historyMode === 'push') {
+    window.history.pushState(null, '', nextUrl)
+    return
+  }
+
+  window.history.replaceState(null, '', nextUrl)
+}
+
+function createDefaultNavigationState(): ConsoleNavigationState {
+  return {
+    entityId: null,
+    entityView: 'content',
+    selectedFilePath: null,
+    fullscreenPane: null,
+  }
+}
+
+function emptyToNull(value: string | null) {
+  return value && value.length > 0 ? value : null
 }
 
 function formatError(error: unknown) {
