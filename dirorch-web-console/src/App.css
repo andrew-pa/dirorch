@@ -527,14 +527,19 @@
   transform: translateY(1px);
 }
 
-.entity-list__title,
 .linked-file-list__item {
   justify-content: space-between;
   gap: 0.55rem;
 }
 
 .entity-list__title {
-  align-items: center;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.entity-list__title {
+  align-items: start;
 }
 
 .entity-list__id,

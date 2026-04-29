@@ -76,7 +76,7 @@ export function WorkflowOverview({
   const [expandedStates, setExpandedStates] = useState<Record<string, boolean>>({})
   const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null)
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null)
-  const [runtimeCollapsed, setRuntimeCollapsed] = useState(false)
+  const [runtimeCollapsed, setRuntimeCollapsed] = useState(true)
   const cursorEntity = findCursorEntity(status.runtime_snapshot, entities)
   const activeIds = runnerEntityIds(status.execution)
   const workflowPaused = status.workflow_pause_state === 'paused'
@@ -544,10 +544,6 @@ function PhasePanel({
                                   <Play size={14} />
                                   Running
                                 </span>
-                              ) : canMoveEntity ? (
-                                <span className="status-pill status-pill--neutral">
-                                  Move
-                                </span>
                               ) : null}
                               {entity.locked ? (
                                 <span className="status-pill status-pill--warning">
@@ -562,7 +558,7 @@ function PhasePanel({
                                 </span>
                               ) : null}
                               {cursorEntity?.id === entity.id &&
-                              cursorEntity.phase === entity.phase ? (
+                              cursorEntity.phase === entity.phase && !entity.processing ? (
                                 <span className="status-pill status-pill--neutral">
                                   <CircleDot size={14} />
                                   Cursor
