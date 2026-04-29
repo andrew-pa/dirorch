@@ -51,12 +51,19 @@ export interface EntitySummary {
   locked: boolean
   paused: boolean
   processing: boolean
+  active_command: ActiveCommand | null
   format: ContentFormat
 }
 
 export interface EntityDetail extends EntitySummary {
   content: string
   json?: JsonValue
+}
+
+export interface ActiveCommand {
+  command: string
+  attempt: number
+  started_at: string
 }
 
 export interface EntityLogPayload {

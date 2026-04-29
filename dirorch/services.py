@@ -264,6 +264,7 @@ class EntityAdminService:
 
     def _serialize_entity(self, entity: Path) -> dict[str, Any]:
         phase_name, state_name = self._entities.phase_state_for(entity)
+        active_command = self._command_registry.active_command_for_entity(entity.name)
         return {
             "id": entity.name,
             "phase": phase_name,
@@ -271,6 +272,7 @@ class EntityAdminService:
             "locked": self._locks.is_locked(entity.name),
             "paused": self._pauses.is_paused(entity.name),
             "processing": self._tracker.is_processing(entity.name),
+            "active_command": active_command,
             "format": "json" if _parse_json_value(self._entities.read_text(entity)) is not None else "text",
         }
 

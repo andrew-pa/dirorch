@@ -287,6 +287,7 @@ phases:
                         "locked": True,
                         "paused": False,
                         "processing": False,
+                        "active_command": None,
                         "format": "text",
                     }
                 ]
@@ -379,6 +380,15 @@ phases:
             async with aiohttp.ClientSession() as session:
                 entity_status = await _wait_for_processing(session, base_url, "active.txt")
                 assert entity_status["processing"] is True
+                active_command = entity_status["active_command"]
+                assert active_command is not None
+                assert active_command["attempt"] == 1
+                assert "sleep 0.6" in active_command["command"]
+                assert active_command["started_at"].endswith("Z")
+
+                async with session.get(f"{base_url}/entity/active.txt") as response:
+                    entity_payload = await response.json()
+                assert entity_payload["active_command"] == active_command
 
                 async with session.get(f"{base_url}/status/workflow") as response:
                     workflow_status = await response.json()

@@ -321,7 +321,12 @@ class HookRunner:
                 exit_code=None,
                 attempts_used=attempt,
             )
-        registration = await self._register_process(execution_context, process)
+        registration = await self._register_process(
+            execution_context,
+            process,
+            cmd,
+            attempt,
+        )
 
         assert process.stdout is not None
         assert process.stderr is not None
@@ -579,6 +584,8 @@ class HookRunner:
         self,
         execution_context: HookExecutionContext | None,
         process: asyncio.subprocess.Process,
+        cmd: str,
+        attempt: int,
     ):
         if (
             self._command_registry is None
@@ -588,6 +595,8 @@ class HookRunner:
             return None
         return await self._command_registry.register(
             execution_context.entity_id,
+            cmd,
+            attempt,
             lambda: terminate_process_group(process.pid),
         )
 

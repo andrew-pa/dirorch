@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRight,
+  Clock3,
   FilePenLine,
   FileJson2,
   LoaderCircle,
@@ -331,9 +332,16 @@ export function EntityEditorModal({
     ? [...currentPhase.states, ...currentPhase.reserved_states]
     : []
   const originalEntity = loadedEntityRef.current
-  const currentEntity = detailQuery.data ?? summary ?? null
+  const currentEntity = detailQuery.data
+    ? {
+        ...detailQuery.data,
+        ...(summary ?? {}),
+      }
+    : (summary ?? null)
   const isPaused = currentEntity?.paused ?? false
   const isProcessing = currentEntity?.processing ?? false
+  const activeCommand = currentEntity?.active_command ?? null
+  const commandElapsed = useElapsedTime(activeCommand?.started_at ?? null, isProcessing)
   const readOnly = mode === 'edit' && (!isEditing || lockState !== 'ready')
   const hasChanges =
     mode === 'create'
@@ -549,6 +557,15 @@ export function EntityEditorModal({
                       <span className="status-pill status-pill--warning">
                         <Pause size={14} />
                         Paused
+                      </span>
+                    ) : null}
+                    {isProcessing ? (
+                      <span
+                        className="status-pill status-pill--warning"
+                        title={activeCommand?.command ?? 'Hook command is running'}
+                      >
+                        <Clock3 size={14} />
+                        {commandElapsed ? `Running ${commandElapsed}` : 'Running'}
                       </span>
                     ) : null}
                   </>
@@ -825,6 +842,46 @@ function createDraftFromEntity(entity: EntityDetail): EntityDraft {
     rawContent: entity.content,
     editorMode: entity.format === 'json' ? 'structured' : 'raw',
   }
+}
+
+function useElapsedTime(startedAt: string | null, running: boolean) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!startedAt || !running) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(intervalId)
+  }, [running, startedAt])
+
+  if (!startedAt || !running) {
+    return null
+  }
+
+  const startedAtMs = Date.parse(startedAt)
+  if (Number.isNaN(startedAtMs)) {
+    return null
+  }
+
+  return formatElapsedSeconds(Math.max(0, Math.floor((now - startedAtMs) / 1_000)))
+}
+
+function formatElapsedSeconds(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3_600)
+  const minutes = Math.floor((totalSeconds % 3_600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`
+  }
+
+  return `${seconds}s`
 }
 
 function formatError(error: unknown) {

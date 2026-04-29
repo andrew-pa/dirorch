@@ -7,6 +7,7 @@ import signal
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .errors import WorkflowError
@@ -122,6 +123,9 @@ class WorkflowPauseController:
 @dataclass
 class ActiveShellCommandHandle:
     terminate: Callable[[], None]
+    command: str
+    attempt: int
+    started_at: str
     pause_requested: bool = False
 
     def request_pause(self) -> None:
@@ -140,9 +144,16 @@ class ActiveShellCommandRegistry:
     async def register(
         self,
         entity_id: str,
+        command: str,
+        attempt: int,
         terminate: Callable[[], None],
     ) -> ActiveShellCommandHandle:
-        handle = ActiveShellCommandHandle(terminate=terminate)
+        handle = ActiveShellCommandHandle(
+            terminate=terminate,
+            command=command,
+            attempt=attempt,
+            started_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
         async with self._condition:
             handles = self._processes.setdefault(entity_id, {})
             handles[id(handle)] = handle
@@ -185,6 +196,17 @@ class ActiveShellCommandRegistry:
     async def active_entity_ids(self) -> set[str]:
         async with self._condition:
             return set(self._processes)
+
+    def active_command_for_entity(self, entity_id: str) -> dict[str, object] | None:
+        handles = list(self._processes.get(entity_id, {}).values())
+        if not handles:
+            return None
+        handle = min(handles, key=lambda item: item.started_at)
+        return {
+            "command": handle.command,
+            "attempt": handle.attempt,
+            "started_at": handle.started_at,
+        }
 
     async def wait_until_idle(self) -> None:
         async with self._condition:

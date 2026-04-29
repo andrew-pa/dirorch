@@ -109,6 +109,7 @@ Current `code` values:
   "locked": false,
   "paused": false,
   "processing": false,
+  "active_command": null,
   "format": "text"
 }
 ```
@@ -121,7 +122,29 @@ Fields:
 - `locked: boolean`
 - `paused: boolean`
 - `processing: boolean`
+- `active_command: ActiveCommand | null`
 - `format: "text" | "json"`
+
+### ActiveCommand
+
+Present while the current Dirorch process has an active shell command registered for the entity. Otherwise `null`.
+
+```json
+{
+  "command": "sleep 10",
+  "attempt": 1,
+  "started_at": "2026-04-09T12:34:56.123456Z"
+}
+```
+
+Fields:
+
+- `command: string`
+  Rendered shell command currently running.
+- `attempt: integer`
+  One-based hook attempt number.
+- `started_at: string`
+  UTC ISO 8601 timestamp recorded when the subprocess was registered.
 
 ### EntityDetail
 
@@ -135,7 +158,9 @@ Text example:
   "phase": "tasks",
   "state": "new",
   "locked": false,
+  "paused": false,
   "processing": false,
+  "active_command": null,
   "format": "text",
   "content": "plain text"
 }
@@ -149,7 +174,9 @@ JSON example:
   "phase": "tasks",
   "state": "new",
   "locked": false,
+  "paused": false,
   "processing": false,
+  "active_command": null,
   "format": "json",
   "content": "{\"name\":\"ship\"}",
   "json": {
@@ -404,6 +431,7 @@ Response `200`:
       "locked": false,
       "paused": true,
       "processing": false,
+      "active_command": null,
       "format": "text"
     }
   ]
@@ -530,6 +558,7 @@ Response `200`:
       "locked": false,
       "paused": false,
       "processing": false,
+      "active_command": null,
       "format": "text"
     }
   ]
@@ -545,6 +574,7 @@ Operational semantics:
 - Results are derived from the current on-disk phase/state layout.
 - `paused=true` means the entity is excluded from transition selection until resumed.
 - `processing=true` is transient and only indicates active in-process execution for the current runner.
+- `active_command` is non-null only while the current process has a registered shell subprocess for that entity.
 
 Errors:
 
@@ -967,5 +997,6 @@ Errors:
 - API write operations are serialized through an internal mutation coordinator.
 - Read endpoints reflect the current in-process view of the filesystem and runner state.
 - `processing=true` is only true while the current process is actively executing that entity.
+- `active_command` metadata is in-memory runtime state for the current process; it is not persisted across Dirorch restarts.
 - When `--web` is enabled without `--watch`, the workflow performs its normal initial pass and then stops, but the API server remains available until process shutdown.
 - Per-entity logs are stored under `${root}/entity_logs/` and are intentionally excluded from the generic `/file` API.
