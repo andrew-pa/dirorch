@@ -129,32 +129,44 @@ export function EntityEditorModal({
 
   const setActiveTab = useCallback(
     (nextActiveTab: EntityPanelTab) => {
+      if (nextActiveTab === activeTab) {
+        return
+      }
+
       if (controlledActiveTab === undefined) {
         setLocalActiveTab(nextActiveTab)
       }
       onActiveTabChange?.(nextActiveTab)
     },
-    [controlledActiveTab, onActiveTabChange],
+    [activeTab, controlledActiveTab, onActiveTabChange],
   )
 
   const setSelectedFilePath = useCallback(
     (nextSelectedFilePath: string | null) => {
+      if (nextSelectedFilePath === selectedFilePath) {
+        return
+      }
+
       if (controlledSelectedFilePath === undefined) {
         setLocalSelectedFilePath(nextSelectedFilePath)
       }
       onSelectedFilePathChange?.(nextSelectedFilePath)
     },
-    [controlledSelectedFilePath, onSelectedFilePathChange],
+    [controlledSelectedFilePath, onSelectedFilePathChange, selectedFilePath],
   )
 
   const setFullscreenPane = useCallback(
     (nextFullscreenPane: EntityFullscreenPane) => {
+      if (nextFullscreenPane === fullscreenPane) {
+        return
+      }
+
       if (controlledFullscreenPane === undefined) {
         setLocalFullscreenPane(nextFullscreenPane)
       }
       onFullscreenPaneChange?.(nextFullscreenPane)
     },
-    [controlledFullscreenPane, onFullscreenPaneChange],
+    [controlledFullscreenPane, fullscreenPane, onFullscreenPaneChange],
   )
 
   useEffect(() => {

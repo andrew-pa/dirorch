@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import type { RefObject } from 'react'
 import type { Content, JSONEditorPropsOptional } from 'vanilla-jsoneditor'
 
 import type { JsonValue } from '../api/types'
@@ -23,9 +24,11 @@ export function StructuredJsonEditor({
   } | null>(null)
   const latestValueRef = useRef(value)
   const latestOnChangeRef = useRef(onChange)
+  const latestSerializedValueRef = useRef(serializeJson(value))
 
   latestValueRef.current = value
   latestOnChangeRef.current = onChange
+  latestSerializedValueRef.current = serializeJson(value)
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -45,7 +48,12 @@ export function StructuredJsonEditor({
       })
 
       editorRef.current.updateProps(
-        buildProps(latestValueRef.current, latestOnChangeRef.current, readOnly),
+        buildProps(
+          latestValueRef.current,
+          latestOnChangeRef.current,
+          latestSerializedValueRef,
+          readOnly,
+        ),
       )
     })
 
@@ -57,7 +65,9 @@ export function StructuredJsonEditor({
   }, [readOnly])
 
   useEffect(() => {
-    editorRef.current?.updateProps(buildProps(value, onChange, readOnly))
+    editorRef.current?.updateProps(
+      buildProps(value, onChange, latestSerializedValueRef, readOnly),
+    )
   }, [readOnly, value, onChange])
 
   return (
@@ -70,6 +80,7 @@ export function StructuredJsonEditor({
 function buildProps(
   value: JsonValue,
   onChange: (value: JsonValue) => void,
+  currentSerializedValueRef: RefObject<string>,
   readOnly: boolean,
 ): JSONEditorPropsOptional {
   return {
@@ -81,8 +92,20 @@ function buildProps(
     statusBar: false,
     onChange: (updatedContent: Content) => {
       if ('json' in updatedContent) {
-        onChange(updatedContent.json as JsonValue)
+        const nextValue = updatedContent.json as JsonValue
+        const nextSerializedValue = serializeJson(nextValue)
+
+        if (nextSerializedValue === currentSerializedValueRef.current) {
+          return
+        }
+
+        currentSerializedValueRef.current = nextSerializedValue
+        onChange(nextValue)
       }
     },
   }
+}
+
+function serializeJson(value: JsonValue) {
+  return JSON.stringify(value)
 }

@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { useCallback, useMemo } from 'react'
 
 import type { ContentFormat, JsonValue } from '../api/types'
 import { tryParseJson } from '../lib/json'
@@ -26,8 +27,17 @@ export function DocumentContentEditor({
   height,
   readOnly = false,
 }: DocumentContentEditorProps) {
-  const parsedJson = format === 'json' ? tryParseJson(rawContent) : null
+  const parsedJson = useMemo(
+    () => (format === 'json' ? tryParseJson(rawContent) : null),
+    [format, rawContent],
+  )
   const structuredDisabled = format !== 'json' || parsedJson?.ok === false
+  const handleStructuredChange = useCallback(
+    (nextValue: JsonValue) => {
+      onRawContentChange(JSON.stringify(nextValue, null, 2))
+    },
+    [onRawContentChange],
+  )
 
   return (
     <section className="document-editor">
@@ -86,7 +96,7 @@ export function DocumentContentEditor({
           height={height}
           readOnly={readOnly}
           value={parsedJson.value as JsonValue}
-          onChange={(nextValue) => onRawContentChange(JSON.stringify(nextValue, null, 2))}
+          onChange={handleStructuredChange}
         />
       ) : (
         <CodeEditor

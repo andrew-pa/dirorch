@@ -740,6 +740,14 @@
   animation: none;
 }
 
+.dialog-content.entity-dialog--fullscreen-child .dialog-body {
+  z-index: 3;
+}
+
+.dialog-content.entity-dialog--fullscreen-child .dialog-footer {
+  display: none;
+}
+
 .entity-dialog {
   max-width: min(1500px, calc(100vw - 3rem));
   margin: auto;
@@ -984,8 +992,20 @@
 }
 
 .entity-log-viewer--fullscreen {
-  min-height: 100dvh;
-  padding: clamp(0.9rem, 2vw, 1.6rem);
+  position: fixed;
+  inset: 0;
+  border: 0;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  transform: none;
+  animation: none;
 }
 
 .entity-log-viewer__header,
@@ -1001,6 +1021,26 @@
 
 .entity-log-viewer__status {
   flex-wrap: wrap;
+}
+
+.entity-log-viewer--fullscreen .entity-log-viewer__header {
+  position: absolute;
+  top: max(0.5rem, env(safe-area-inset-top));
+  left: max(0.5rem, env(safe-area-inset-left));
+  right: max(0.5rem, env(safe-area-inset-right));
+  z-index: 2;
+  align-items: flex-start;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.entity-log-viewer--fullscreen .entity-log-viewer__status {
+  max-width: calc(100% - 3rem);
+}
+
+.entity-log-viewer--fullscreen .entity-log-viewer__status,
+.entity-log-viewer--fullscreen .icon-button {
+  pointer-events: auto;
 }
 
 .entity-log-viewer__body {
@@ -1029,10 +1069,16 @@
 
 .entity-log-viewer--fullscreen .entity-log-viewer__body {
   flex: 1;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .entity-log-viewer--fullscreen .entity-log-viewer__terminal {
   height: 100%;
+  min-height: 0;
+  padding: 0;
 }
 
 .entity-log-viewer__terminal .xterm,

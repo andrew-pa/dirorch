@@ -1,9 +1,10 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { LoaderCircle, Maximize2, Minimize2, Radio, WifiOff } from 'lucide-react'
 import { FitAddon } from '@xterm/addon-fit'
-import { Terminal } from '@xterm/xterm'
-import '@xterm/xterm/css/xterm.css'
+import type { ITerminalOptions, Terminal } from '@xterm/xterm'
+import { useXTerm } from 'react-xtermjs'
 
 import { getEntityLog, openEntityLogEvents } from '../api/dirorch'
 import type {
@@ -30,52 +31,33 @@ export function EntityLogViewer({
   onCloseFullscreen,
   onOpenFullscreen,
 }: EntityLogViewerProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null)
-  const terminalRef = useRef<Terminal | null>(null)
+  const viewer = (
+    <EntityLogViewerSurface
+      key={fullscreen ? 'fullscreen' : 'embedded'}
+      entityId={entityId}
+      fullscreen={fullscreen}
+      onCloseFullscreen={onCloseFullscreen}
+      onOpenFullscreen={onOpenFullscreen}
+    />
+  )
+
+  if (fullscreen && typeof document !== 'undefined') {
+    return createPortal(viewer, document.body)
+  }
+
+  return viewer
+}
+
+function EntityLogViewerSurface({
+  entityId,
+  fullscreen = false,
+  onCloseFullscreen,
+  onOpenFullscreen,
+}: EntityLogViewerProps) {
   const autoFollowRef = useRef(true)
-
-  const [snapshotState, setSnapshotState] = useState<SnapshotState>('loading')
-  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
-  const [processing, setProcessing] = useState(false)
-  const [hasContent, setHasContent] = useState(false)
-  const [autoFollow, setAutoFollow] = useState(true)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-
-  useEffect(() => {
-    autoFollowRef.current = autoFollow
-  }, [autoFollow])
-
-  const appendText = useEffectEvent((text: string) => {
-    const terminal = terminalRef.current
-    if (!terminal || text.length === 0) {
-      return
-    }
-
-    terminal.write(text, () => {
-      if (autoFollowRef.current) {
-        terminal.scrollToBottom()
-      }
-    })
-    setHasContent(true)
-  })
-
-  const resetTerminal = useEffectEvent(() => {
-    const terminal = terminalRef.current
-    if (!terminal) {
-      return
-    }
-
-    terminal.reset()
-    terminal.clear()
-  })
-
-  useEffect(() => {
-    const host = hostRef.current
-    if (!host) {
-      return
-    }
-
-    const terminal = new Terminal({
+  const fitAddon = useMemo(() => new FitAddon(), [])
+  const terminalOptions = useMemo<ITerminalOptions>(
+    () => ({
       convertEol: true,
       disableStdin: true,
       allowTransparency: true,
@@ -103,35 +85,111 @@ export function EntityLogViewer({
         brightCyan: '#9ff6ff',
         brightWhite: '#ffffff',
       },
-    })
-    const fitAddon = new FitAddon()
-    terminal.loadAddon(fitAddon)
-    terminal.open(host)
-    fitAddon.fit()
+    }),
+    [],
+  )
+  const terminalAddons = useMemo(() => [fitAddon], [fitAddon])
+  const { instance: terminal, ref: terminalRef } = useXTerm({
+    addons: terminalAddons,
+    options: terminalOptions,
+  })
 
-    const scrollDisposable = terminal.onScroll(() => {
-      setAutoFollow(isNearBottom(terminal))
-    })
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit()
+  const [snapshotState, setSnapshotState] = useState<SnapshotState>('loading')
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
+  const [processing, setProcessing] = useState(false)
+  const [hasContent, setHasContent] = useState(false)
+  const [autoFollow, setAutoFollow] = useState(true)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    autoFollowRef.current = autoFollow
+  }, [autoFollow])
+
+  const appendText = useEffectEvent((text: string) => {
+    if (!terminal || text.length === 0) {
+      return
+    }
+
+    terminal.write(text, () => {
       if (autoFollowRef.current) {
         terminal.scrollToBottom()
       }
     })
-    resizeObserver.observe(host)
+    setHasContent(true)
+  })
 
-    terminalRef.current = terminal
-    return () => {
-      resizeObserver.disconnect()
-      scrollDisposable.dispose()
-      fitAddon.dispose()
-      terminal.dispose()
-      terminalRef.current = null
+  const resetTerminal = useEffectEvent(() => {
+    if (!terminal) {
+      return
     }
-  }, [])
+
+    terminal.reset()
+    terminal.clear()
+  })
 
   useEffect(() => {
-    const terminal = terminalRef.current
+    if (!terminal) {
+      return
+    }
+
+    let fitFrameId: number | null = null
+
+    const fitTerminal = () => {
+      try {
+        fitAddon.fit()
+      } catch {
+        // xterm can report incomplete dimensions before its renderer finishes mounting.
+      }
+    }
+
+    const scheduleFit = () => {
+      if (fitFrameId !== null) {
+        window.cancelAnimationFrame(fitFrameId)
+      }
+      fitFrameId = window.requestAnimationFrame(() => {
+        fitFrameId = null
+        fitTerminal()
+      })
+    }
+
+    scheduleFit()
+    const host = terminalRef.current
+    const resizeObserver = host
+      ? new ResizeObserver(() => {
+        scheduleFit()
+        if (autoFollowRef.current) {
+          terminal.scrollToBottom()
+        }
+      })
+      : null
+
+    if (host) {
+      resizeObserver?.observe(host)
+    }
+
+    return () => {
+      if (fitFrameId !== null) {
+        window.cancelAnimationFrame(fitFrameId)
+      }
+      resizeObserver?.disconnect()
+    }
+  }, [fitAddon, terminal, terminalRef])
+
+  useEffect(() => {
+    if (!terminal) {
+      return
+    }
+
+    const scrollDisposable = terminal.onScroll(() => {
+      setAutoFollow(isNearBottom(terminal))
+    })
+
+    return () => {
+      scrollDisposable.dispose()
+    }
+  }, [terminal])
+
+  useEffect(() => {
     if (!terminal) {
       return
     }
@@ -228,7 +286,7 @@ export function EntityLogViewer({
       active = false
       eventSource?.close()
     }
-  }, [entityId])
+  }, [entityId, terminal])
 
   return (
     <section className={clsx('entity-log-viewer', fullscreen && 'entity-log-viewer--fullscreen')}>
@@ -258,9 +316,6 @@ export function EntityLogViewer({
             {processing ? <LoaderCircle className="spin" size={14} /> : <Radio size={14} />}
             {processing ? 'Running' : 'Idle'}
           </span>
-          <span className="status-pill status-pill--neutral">
-            {autoFollow ? 'Following output' : 'Scroll locked'}
-          </span>
         </div>
         {fullscreen ? (
           <button
@@ -284,7 +339,7 @@ export function EntityLogViewer({
       </header>
 
       <div className="entity-log-viewer__body">
-        <div ref={hostRef} className="entity-log-viewer__terminal" />
+        <div ref={terminalRef} className="entity-log-viewer__terminal" />
 
         {snapshotState === 'loading' && !hasContent ? (
           <EmptyState className="entity-log-viewer__empty" icon={<LoaderCircle className="spin" size={16} />}>

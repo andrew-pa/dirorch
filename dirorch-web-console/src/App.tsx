@@ -443,6 +443,10 @@ function useUrlNavigationState() {
       const currentState = navigationStateRef.current
       const nextState = typeof next === 'function' ? next(currentState) : next
 
+      if (isSameNavigationState(currentState, nextState)) {
+        return
+      }
+
       navigationStateRef.current = nextState
       writeUrlNavigationState(nextState, historyMode)
       setNavigationStateValue(nextState)
@@ -537,6 +541,18 @@ function createDefaultNavigationState(): ConsoleNavigationState {
     selectedFilePath: null,
     fullscreenPane: null,
   }
+}
+
+function isSameNavigationState(
+  currentState: ConsoleNavigationState,
+  nextState: ConsoleNavigationState,
+) {
+  return (
+    currentState.entityId === nextState.entityId &&
+    currentState.entityView === nextState.entityView &&
+    currentState.selectedFilePath === nextState.selectedFilePath &&
+    currentState.fullscreenPane === nextState.fullscreenPane
+  )
 }
 
 function emptyToNull(value: string | null) {
