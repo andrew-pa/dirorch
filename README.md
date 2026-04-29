@@ -223,7 +223,7 @@ Phase fields:
 Transition fields:
 
 - `from` (required): source state
-- `to` (required): either a destination state string or a hook object with `cmd` and optional `stdin`
+- `to` (required): either a destination state string or a hook object with `cmd` and optional `stdin`; dynamic `to` hooks may also set `poll` to a positive seconds value to retry empty successful selections
 - `cmd` (optional): shell command to run before move
 - `stdin` (optional): text rendered and piped to the hook process stdin (requires `cmd`)
 - `cwd` (optional): working directory for this transition command; requires `cmd` and overrides phase/workflow `cwd`
@@ -375,6 +375,7 @@ Transition processing details:
 - If a selector command writes nothing to `DIRORCH_SELECTOR_PIPE`, the selection is treated as empty:
   - empty dynamic `to` means no move and no failure
   - empty dynamic `jump` means move normally and skip the jump
+- If a dynamic `to` hook sets `poll`, an empty successful selection sleeps for the configured positive seconds value and reruns the selector until a destination is written. Poll reruns do not consume the failure retry counter.
 - Selector stdout/stderr do not affect target selection.
 - If transition `cmd` or a dynamic selector fails after retries, entity moves to `_failed`.
 - Unknown non-empty dynamic state, phase, or `<phase>/<state>` names also move the entity to `_failed`.
@@ -489,6 +490,7 @@ phases:
         cmd: >
           ./prepare-task "$INPUT_ENTITY"
         to:
+          poll: 5
           cmd: >
             if grep -q review "$INPUT_ENTITY"; then printf '%s\n' review > "$DIRORCH_SELECTOR_PIPE"; else printf '%s\n' done > "$DIRORCH_SELECTOR_PIPE"; fi
         jump:
@@ -505,6 +507,7 @@ Dynamic selector notes:
 - A fresh temporary named pipe is created for each selector attempt and cleaned up after the attempt finishes.
 - Dirorch strips surrounding whitespace and uses the first output line from `DIRORCH_SELECTOR_PIPE`.
 - Empty pipe output means "no selection".
+- For dynamic `to` selectors, `poll: <seconds>` turns an empty successful selection into an unbounded polling loop. Failed poll attempts still use the normal hook retry policy; successful empty poll attempts do not.
 
 ## Logging
 

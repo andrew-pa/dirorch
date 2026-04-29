@@ -316,6 +316,9 @@ class PhaseProcessor:
             context,
             cwd=self.config.cwd,
             capture_selector_output=True,
+            selector_poll_interval=(
+                target.hook.poll if selector_kind == "destination" else None
+            ),
             execution_context=self._hook_execution_context(
                 entity,
                 transition,

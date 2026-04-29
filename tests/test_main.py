@@ -107,6 +107,7 @@ phases:
           cmd: "printf '%s\\n' review > \\\"$DIRORCH_SELECTOR_PIPE\\\""
           stdin: "{{ INPUT_ENTITY }}"
           cwd: selector-dir
+          poll: 2.5
         jump:
           cmd: "printf '%s\\n' audit > \\\"$DIRORCH_SELECTOR_PIPE\\\""
           cwd: jump-dir
@@ -123,6 +124,7 @@ phases:
     assert transition.destination.hook.cmd == "printf '%s\n' review > \"$DIRORCH_SELECTOR_PIPE\""
     assert transition.destination.hook.stdin == "{{ INPUT_ENTITY }}"
     assert transition.destination.hook.cwd == "selector-dir"
+    assert transition.destination.hook.poll == 2.5
     assert transition.jump_target is not None
     assert transition.jump_target.hook is not None
     assert transition.jump_target.hook.cmd == "printf '%s\n' audit > \"$DIRORCH_SELECTOR_PIPE\""
@@ -272,6 +274,19 @@ phases:
           stdin: hello
 """,
             "to selector has invalid 'cmd'",
+        ),
+        (
+            """
+phases:
+  p:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          cmd: "true"
+          poll: soon
+""",
+            "to selector has invalid 'poll'",
         ),
         (
             """
@@ -1129,6 +1144,45 @@ phases:
     _run_workflow(workflow, tmp_path)
 
     assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+
+
+def test_dynamic_destination_poll_retries_empty_output_until_selected(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    counter = tmp_path / "selector.count"
+    _write(
+        workflow,
+        f"""
+retries: 1
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to:
+          poll: 0.01
+          cmd: >
+            count=0;
+            if [ -f "{counter}" ]; then count=$(cat "{counter}"); fi;
+            count=$((count + 1));
+            printf '%s\\n' "$count" > "{counter}";
+            case "$count" in
+              1|2) true ;;
+              3) exit 9 ;;
+              *) printf '%s\\n' done > "$DIRORCH_SELECTOR_PIPE" ;;
+            esac
+""",
+    )
+    new_dir = tmp_path / "tasks" / "new"
+    new_dir.mkdir(parents=True)
+    _write(new_dir / "item.txt", "x")
+
+    _run_workflow(workflow, tmp_path)
+
+    assert counter.read_text(encoding="utf-8").strip() == "4"
+    assert (tmp_path / "tasks" / "done" / "item.txt").exists()
+    assert not (tmp_path / "tasks" / FAILED_STATE / "item.txt").exists()
 
 
 def test_template_renderer_auto_reloads_included_fragments(tmp_path: Path) -> None:

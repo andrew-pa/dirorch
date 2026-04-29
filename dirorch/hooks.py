@@ -106,13 +106,16 @@ class HookRunner:
         *,
         cwd: str | None = None,
         capture_selector_output: bool = False,
+        selector_poll_interval: float | None = None,
         execution_context: HookExecutionContext | None = None,
     ) -> CommandResult:
         attempts = self._retries + 1
         base_env = self._base_env | extra_env
         base_template_env = self._template_env | extra_env
         last_exit_code: int | None = None
-        for attempt in range(1, attempts + 1):
+        attempt = 1
+        failure_attempt = 1
+        while failure_attempt <= attempts:
             if self._should_pause(execution_context):
                 return CommandResult(
                     succeeded=False,
@@ -149,13 +152,15 @@ class HookRunner:
                         attempts,
                         exc,
                     )
-                    if attempt < attempts:
+                    if failure_attempt < attempts:
                         await self._emit_command_retrying(
-                            attempt,
+                            failure_attempt,
                             attempts,
                             execution_context,
                             reason=f"cmd template error: {exc}",
                         )
+                    failure_attempt += 1
+                    attempt += 1
                     continue
                 await self._emit_command_started(rendered_cmd, attempt, execution_context)
                 try:
@@ -176,13 +181,15 @@ class HookRunner:
                         attempts,
                         exc,
                     )
-                    if attempt < attempts:
+                    if failure_attempt < attempts:
                         await self._emit_command_retrying(
-                            attempt,
+                            failure_attempt,
                             attempts,
                             execution_context,
                             reason=f"stdin template error: {exc}",
                         )
+                    failure_attempt += 1
+                    attempt += 1
                     continue
                 try:
                     rendered_cwd = self._render_cwd(hook, cwd, template_env)
@@ -202,13 +209,15 @@ class HookRunner:
                         attempts,
                         exc,
                     )
-                    if attempt < attempts:
+                    if failure_attempt < attempts:
                         await self._emit_command_retrying(
-                            attempt,
+                            failure_attempt,
                             attempts,
                             execution_context,
                             reason=f"cwd template error: {exc}",
                         )
+                    failure_attempt += 1
+                    attempt += 1
                     continue
                 result = await self._run_once(
                     rendered_cmd,
@@ -240,6 +249,14 @@ class HookRunner:
                     exit_code=result.exit_code,
                 )
                 if result.succeeded:
+                    if (
+                        selector_poll_interval is not None
+                        and capture_selector_output
+                        and not result.selector_output
+                    ):
+                        await asyncio.sleep(selector_poll_interval)
+                        attempt += 1
+                        continue
                     return CommandResult(
                         succeeded=True,
                         exit_code=result.exit_code,
@@ -249,17 +266,19 @@ class HookRunner:
                 self._logger.warning(
                     "%s failed (attempt %d/%d, exit=%s)",
                     context,
-                    attempt,
+                    failure_attempt,
                     attempts,
                     result.exit_code,
                 )
-                if attempt < attempts:
+                if failure_attempt < attempts:
                     await self._emit_command_retrying(
-                        attempt,
+                        failure_attempt,
                         attempts,
                         execution_context,
                         reason=f"exit={result.exit_code}",
                     )
+                failure_attempt += 1
+                attempt += 1
             finally:
                 if selector_pipe is not None:
                     self._cleanup_selector_pipe(selector_pipe)

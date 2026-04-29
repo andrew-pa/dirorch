@@ -344,10 +344,12 @@ def _parse_hook(raw_hook: Any) -> HookConfig:
         cmd = raw_hook
         stdin = None
         cwd = None
+        poll = None
     elif isinstance(raw_hook, dict):
         cmd = raw_hook.get("cmd")
         stdin = raw_hook.get("stdin")
         cwd = raw_hook.get("cwd")
+        poll = raw_hook.get("poll")
     else:
         raise ValueError("hook must be string or mapping")
 
@@ -357,4 +359,8 @@ def _parse_hook(raw_hook: Any) -> HookConfig:
         raise WorkflowError("has invalid 'stdin'")
     if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
         raise WorkflowError("has invalid 'cwd'")
-    return HookConfig(cmd=cmd, stdin=stdin, cwd=cwd)
+    if poll is not None:
+        if isinstance(poll, bool) or not isinstance(poll, (int, float)) or poll <= 0:
+            raise WorkflowError("has invalid 'poll'")
+        poll = float(poll)
+    return HookConfig(cmd=cmd, stdin=stdin, cwd=cwd, poll=poll)

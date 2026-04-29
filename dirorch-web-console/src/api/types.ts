@@ -20,6 +20,7 @@ export interface CompletionHook {
   cmd: string
   stdin: string | null
   cwd: string | null
+  poll: number | null
 }
 
 export type NamedTargetDefinition = string | CompletionHook

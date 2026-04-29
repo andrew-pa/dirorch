@@ -389,6 +389,7 @@ Completion/init hook fields:
 - `cmd: string`
 - `stdin: string | null`
 - `cwd: string | null`
+- `poll: number | null`
 
 Hook `cmd`, `stdin`, and `cwd` values are rendered as Jinja2 templates before execution. Relative `cwd` values resolve under `--root`, with precedence: hook `cwd`, phase `cwd`, workflow `cwd`, then `--root`.
 
@@ -397,6 +398,7 @@ Dynamic target semantics:
 - Transition side-effect `cmd` runs before dynamic `to` or dynamic `jump` selectors.
 - Selector commands must write the chosen state, phase, or `<phase>/<state>` name to the temporary pipe path in `DIRORCH_SELECTOR_PIPE`.
 - Empty dynamic `to` output means no move; empty dynamic `jump` output means no jump.
+- Dynamic `to` selectors with a positive `poll` seconds value rerun when the command succeeds with empty pipe output, continuing until a destination is selected. These empty poll reruns do not consume hook failure retries.
 
 Errors:
 

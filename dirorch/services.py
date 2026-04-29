@@ -65,7 +65,12 @@ class WorkflowDefinitionService:
                         for transition in phase.transitions
                     ],
                     "completions": [
-                        {"cmd": hook.cmd, "stdin": hook.stdin, "cwd": hook.cwd}
+                        {
+                            "cmd": hook.cmd,
+                            "stdin": hook.stdin,
+                            "cwd": hook.cwd,
+                            "poll": hook.poll,
+                        }
                         for hook in phase.completions
                     ],
                 }
@@ -82,6 +87,7 @@ class WorkflowDefinitionService:
                 "cmd": self._config.init.cmd,
                 "stdin": self._config.init.stdin,
                 "cwd": self._config.init.cwd,
+                "poll": self._config.init.poll,
             },
             "phases": phases,
         }
@@ -95,7 +101,7 @@ class WorkflowDefinitionService:
     def _serialize_named_target(
         self,
         target: NamedTargetConfig,
-    ) -> str | dict[str, str | None]:
+    ) -> str | dict[str, str | float | None]:
         if target.constant is not None:
             return target.constant
         assert target.hook is not None
@@ -103,6 +109,7 @@ class WorkflowDefinitionService:
             "cmd": target.hook.cmd,
             "stdin": target.hook.stdin,
             "cwd": target.hook.cwd,
+            "poll": target.hook.poll,
         }
 
 

@@ -15,6 +15,7 @@ class HookConfig:
     cmd: str
     stdin: str | None = None
     cwd: str | None = None
+    poll: float | None = None
 
 
 @dataclass(frozen=True)
