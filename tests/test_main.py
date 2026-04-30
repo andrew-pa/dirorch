@@ -60,6 +60,7 @@ def test_load_workflow_parses_env_retries_and_init(tmp_path: Path) -> None:
         workflow,
         """
 retries: 5
+failed_entity_threshold: 7
 env:
   FOO: bar
 init:
@@ -81,6 +82,7 @@ phases:
     config = load_workflow(workflow)
 
     assert config.retries == 5
+    assert config.failed_entity_threshold == 7
     assert config.environment == {"FOO": "bar"}
     assert config.phase_order == ("tasks",)
     assert config.phases[0].states == ("new", "done")
@@ -195,6 +197,24 @@ phases:
     states: [new]
 """,
             "hook has invalid 'cwd'",
+        ),
+        (
+            """
+failed_entity_threshold: 0
+phases:
+  p:
+    states: [new]
+""",
+            "'failed_entity_threshold' must be a positive integer or null",
+        ),
+        (
+            """
+failed_entity_threshold: true
+phases:
+  p:
+    states: [new]
+""",
+            "'failed_entity_threshold' must be a positive integer or null",
         ),
         (
             """

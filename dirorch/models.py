@@ -63,6 +63,7 @@ class WorkflowConfig:
     phases: tuple[PhaseConfig, ...]
     environment: dict[str, str]
     retries: int
+    failed_entity_threshold: int | None
     init: HookConfig | None
     cwd: str | None = None
 

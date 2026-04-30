@@ -81,6 +81,13 @@ class EntityStore:
             entities.extend(self._list_entities(directory))
         return sorted(entities, key=lambda path: (path.name, str(path.parent)))
 
+    def count_entities_in_state(self, state_name: str) -> int:
+        return sum(
+            len(self._list_entities(directory))
+            for (_phase_name, candidate_state), directory in self._phase_state_dirs.items()
+            if candidate_state == state_name
+        )
+
     def locate_entities(self, entity_id: str) -> list[Path]:
         matches = [
             entity for entity in self.list_all_entities() if entity.name == entity_id

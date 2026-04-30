@@ -204,6 +204,7 @@ Top-level fields:
 
 - `phases` (required): mapping of phase name -> phase definition
 - `retries` (optional): non-negative integer, default `3`
+- `failed_entity_threshold` (optional): positive integer emergency-stop threshold; when the total number of entities in `_failed` reaches this value, the workflow is globally paused. Omit or set `null` to disable.
 - `env` or `environment` (optional): map of string env vars passed to hooks; values are Jinja2 templates rendered at startup
 - `cwd` (optional): default working directory for hook commands; relative paths resolve under `--root`
 - `init` (optional): one-time startup hook before any phase runs
@@ -378,6 +379,7 @@ Transition processing details:
 - If a dynamic `to` hook sets `poll`, an empty successful selection sleeps for the configured positive seconds value and reruns the selector until a destination is written. Poll reruns do not consume the failure retry counter.
 - Selector stdout/stderr do not affect target selection.
 - If transition `cmd` or a dynamic selector fails after retries, entity moves to `_failed`.
+- If `failed_entity_threshold` is configured and the total `_failed` entity count reaches the threshold, Dirorch requests the same global workflow pause used by `/workflow/pause`.
 - Unknown non-empty dynamic state, phase, or `<phase>/<state>` names also move the entity to `_failed`.
 - On successful transition with `jump`, target phase is run to fixpoint, then execution returns to the current phase.
 - `init`, completion hooks, transition side-effects, and dynamic selectors all use the same retry policy (`retries + 1` total attempts).

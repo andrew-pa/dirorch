@@ -41,6 +41,12 @@ EntityCursorClearer = Callable[[], None]
 EntityLockChecker = Callable[[str], bool]
 EntityPauseChecker = Callable[[str], bool]
 WorkflowPauseChecker = Callable[[], bool]
+WorkflowPauseRequester = Callable[[], Awaitable[None]]
+EntityFailureHandler = Callable[[], Awaitable[None]]
+
+
+async def _noop_entity_failure_handler() -> None:
+    return None
 
 
 class EntityPausedSignal(Exception):
@@ -65,6 +71,7 @@ class PhaseProcessorDeps:
     is_entity_locked: EntityLockChecker
     is_entity_paused: EntityPauseChecker
     is_workflow_pause_requested: WorkflowPauseChecker
+    on_entity_failed: EntityFailureHandler = _noop_entity_failure_handler
     entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
 
@@ -84,6 +91,7 @@ class PhaseProcessor:
         self._is_entity_locked = deps.is_entity_locked
         self._is_entity_paused = deps.is_entity_paused
         self._is_workflow_pause_requested = deps.is_workflow_pause_requested
+        self._on_entity_failed = deps.on_entity_failed
         self._entity_log_emitter = deps.entity_log_emitter
         self.config = config
 
@@ -391,6 +399,7 @@ class PhaseProcessor:
                 self.config.name,
                 FAILED_STATE,
             )
+        await self._on_entity_failed()
         return TransitionResult(
             moved=False,
             failed=True,
@@ -577,6 +586,7 @@ class AllAtOncePhaseProcessor(PhaseProcessor):
                     moved += 1
                     if result.jump_phase is not None:
                         jumps.append(result.jump_phase)
+            self._ensure_workflow_not_paused()
         return moved, jumps
 
     def _groups_for_entities(self, entities: list[Path]) -> list[Group]:
@@ -651,6 +661,7 @@ class ParallelPhaseProcessor(PhaseProcessor):
 
             tasks = [self._flow_entity_to_rest(entity) for entity in entities]
             moves = await asyncio.gather(*tasks)
+            self._ensure_workflow_not_paused()
             moved_this_pass = sum(moves)
             moved_total += moved_this_pass
             if moved_this_pass == 0:
@@ -720,6 +731,7 @@ class OneAtATimePhaseProcessor(PhaseProcessor):
             moved_this_pass = 0
             for entity in self._entities_for_pass():
                 moved = await self._flow_entity_to_rest(entity)
+                self._ensure_workflow_not_paused()
                 moved_this_pass += moved
                 moved_total += moved
             if moved_this_pass == 0:
@@ -841,6 +853,7 @@ class WorkflowEngine:
         is_entity_locked: EntityLockChecker | None = None
         is_entity_paused: EntityPauseChecker | None = None
         is_workflow_pause_requested: WorkflowPauseChecker | None = None
+        request_workflow_pause: WorkflowPauseRequester | None = None
         entity_log_emitter: EntityLogEmitter = NullEntityLogEmitter()
 
     def __init__(
@@ -873,10 +886,12 @@ class WorkflowEngine:
             is_entity_locked=is_entity_locked,
             is_entity_paused=is_entity_paused,
             is_workflow_pause_requested=is_workflow_pause_requested,
+            on_entity_failed=self._handle_entity_failed,
             entity_log_emitter=deps.entity_log_emitter,
         )
         self._execution_observer = execution_observer
         self._is_workflow_pause_requested = is_workflow_pause_requested
+        self._request_workflow_pause = deps.request_workflow_pause
 
     def _processor_for_phase(self, phase: PhaseConfig) -> PhaseProcessor:
         return PHASE_PROCESSOR_FOR_MODE[phase.mode](self._phase_processor_deps, phase)
@@ -973,6 +988,26 @@ class WorkflowEngine:
     def _ensure_workflow_not_paused(self) -> None:
         if self._is_workflow_pause_requested():
             raise WorkflowPausedSignal()
+
+    async def _handle_entity_failed(self) -> None:
+        threshold = self._config.failed_entity_threshold
+        if (
+            threshold is None
+            or self._request_workflow_pause is None
+            or self._is_workflow_pause_requested()
+        ):
+            return
+
+        failed_count = self._entities.count_entities_in_state(FAILED_STATE)
+        if failed_count < threshold:
+            return
+
+        self._logger.error(
+            "Failed entity threshold reached (%d/%d); pausing workflow",
+            failed_count,
+            threshold,
+        )
+        await self._request_workflow_pause()
 
     def _load_or_init_snapshot(self, phase_order: tuple[str, ...]) -> RuntimeSnapshot:
         snapshot = self._state.load_snapshot()

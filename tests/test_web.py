@@ -4,6 +4,7 @@ import socket
 import sys
 from contextlib import suppress
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
@@ -380,7 +381,7 @@ phases:
             async with aiohttp.ClientSession() as session:
                 entity_status = await _wait_for_processing(session, base_url, "active.txt")
                 assert entity_status["processing"] is True
-                active_command = entity_status["active_command"]
+                active_command = cast(dict[str, Any] | None, entity_status["active_command"])
                 assert active_command is not None
                 assert active_command["attempt"] == 1
                 assert "sleep 0.6" in active_command["command"]
@@ -849,6 +850,67 @@ phases:
                 running = await _wait_for_entity(session, base_url, "running.txt")
                 assert running["paused"] is True
                 assert (tmp_path / "tasks" / "new" / "running.txt").exists()
+        finally:
+            server_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await server_task
+
+    asyncio.run(scenario())
+
+
+def test_failed_entity_threshold_pauses_workflow(tmp_path: Path) -> None:
+    workflow = tmp_path / "workflow.yaml"
+    _write(
+        workflow,
+        """
+failed_entity_threshold: 1
+retries: 0
+phases:
+  tasks:
+    states: [new, done]
+    transitions:
+      - from: new
+        to: done
+        cmd: "exit 2"
+""",
+    )
+    _write(tmp_path / "tasks" / "new" / "a.txt", "payload")
+    _write(tmp_path / "tasks" / "new" / "b.txt", "payload")
+    port = _free_port()
+
+    async def scenario() -> None:
+        options = CliOptions(
+            workflow=workflow,
+            root=tmp_path,
+            retries_override=None,
+            state_file=".dirorch_runtime.json",
+            log_level="ERROR",
+            web=True,
+            web_host="127.0.0.1",
+            web_port=port,
+            watch=True,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        server_task = asyncio.create_task(run(options))
+        try:
+            await _wait_for_server(base_url)
+            async with aiohttp.ClientSession() as session:
+                await _wait_for_entity_state(session, base_url, "a.txt", "_failed")
+
+                deadline = asyncio.get_running_loop().time() + 5.0
+                while True:
+                    async with session.get(f"{base_url}/status/workflow") as response:
+                        workflow_status = await response.json()
+                    if workflow_status["workflow_pause_state"] == "paused":
+                        break
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise AssertionError("Timed out waiting for workflow pause")
+                    await asyncio.sleep(0.05)
+
+                assert workflow_status["counts"]["tasks"]["_failed"] == 1
+                waiting = await _wait_for_entity(session, base_url, "b.txt")
+                assert waiting["state"] == "new"
+                assert not waiting["processing"]
         finally:
             server_task.cancel()
             with suppress(asyncio.CancelledError):

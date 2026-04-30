@@ -40,6 +40,7 @@ export interface WorkflowDefinition {
   phase_order: string[]
   environment: Record<string, string>
   retries: number
+  failed_entity_threshold: number | null
   cwd: string | null
   init: CompletionHook | null
   phases: PhaseDefinition[]

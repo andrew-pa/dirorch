@@ -80,6 +80,7 @@ class WorkflowDefinitionService:
             "phase_order": list(self._config.phase_order),
             "environment": self._config.environment,
             "retries": self._config.retries,
+            "failed_entity_threshold": self._config.failed_entity_threshold,
             "cwd": self._config.cwd,
             "init": None
             if self._config.init is None

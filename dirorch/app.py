@@ -127,6 +127,7 @@ class WorkflowRunner:
                     try:
                         await self._engine.run()
                     except WorkflowPausedSignal:
+                        await self._workflow_pause.mark_paused()
                         self._tracker.runner_paused()
                         continue
                     self._tracker.runner_stopped()
@@ -145,6 +146,7 @@ class WorkflowRunner:
             try:
                 await self._engine.run()
             except WorkflowPausedSignal:
+                await self._workflow_pause.mark_paused()
                 self._tracker.runner_paused()
                 continue
             previous_layout = self._entities.entity_layout()
@@ -226,6 +228,7 @@ def _build_runtime(options: CliOptions, logger: logging.Logger) -> RuntimeContex
             is_entity_locked=locks.is_locked,
             is_entity_paused=pauses.is_paused,
             is_workflow_pause_requested=workflow_pause.is_pause_requested,
+            request_workflow_pause=workflow_pause.request_pause,
             entity_log_emitter=entity_log_emitter,
         ),
     )

@@ -38,6 +38,7 @@ def load_workflow(path: Path) -> WorkflowConfig:
 
     environment = _load_environment(payload)
     retries = _load_retries(payload)
+    failed_entity_threshold = _load_failed_entity_threshold(payload)
     cwd = _parse_optional_cwd(payload, "Workflow")
     init = _parse_optional_hook(payload, "init")
     phases = _parse_phases(raw_phases)
@@ -47,6 +48,7 @@ def load_workflow(path: Path) -> WorkflowConfig:
         phases=phases,
         environment=environment,
         retries=retries,
+        failed_entity_threshold=failed_entity_threshold,
         init=init,
         cwd=cwd,
     )
@@ -76,6 +78,15 @@ def _load_retries(payload: dict[str, Any]) -> int:
     if not isinstance(retries, int) or retries < 0:
         raise WorkflowError("'retries' must be a non-negative integer")
     return retries
+
+
+def _load_failed_entity_threshold(payload: dict[str, Any]) -> int | None:
+    threshold = payload.get("failed_entity_threshold")
+    if threshold is None:
+        return None
+    if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold <= 0:
+        raise WorkflowError("'failed_entity_threshold' must be a positive integer or null")
+    return threshold
 
 
 def _parse_optional_hook(payload: dict[str, Any], field_name: str) -> HookConfig | None:

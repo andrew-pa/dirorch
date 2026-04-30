@@ -329,6 +329,7 @@ Response `200`:
   "phase_order": ["tasks"],
   "environment": {},
   "retries": 3,
+  "failed_entity_threshold": null,
   "cwd": null,
   "init": null,
   "phases": [
@@ -360,6 +361,7 @@ Fields:
 - `phase_order: array<string>`
 - `environment: object`
 - `retries: integer`
+- `failed_entity_threshold: integer | null`
 - `cwd: string | null`
 - `init: object | null`
 - `phases: array<object>`
